@@ -7,7 +7,7 @@
 #   python tools/build_ek55_assets.py \
 #       --annotations /data/datasets/EPIC-KITCHENS/annotations/EPIC_55_train.csv \
 #       --frames-root /data/datasets/EPIC-KITCHENS/rgb_frames \
-#       --out-dir     /data/datasets/EPIC-KITCHENS/ckpt_assets \
+#       --out-dir     /data/ldy/ek55_assets \
 #       --frames-per-segment 8 --image-size 224 --workers 16
 #
 # 先干跑（只报告会做什么、跳过多少段，不写文件）：

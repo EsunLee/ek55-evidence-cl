@@ -69,7 +69,7 @@ python tools/inventory_data.py --data-root /data/datasets/EPIC-KITCHENS/rgb_fram
 python tools/build_ek55_assets.py \
     --annotations /data/datasets/EPIC-KITCHENS/annotations/EPIC_55_train.csv \
     --frames-root /data/datasets/EPIC-KITCHENS/rgb_frames \
-    --out-dir     /data/datasets/EPIC-KITCHENS/ckpt_assets \
+    --out-dir     /data/ldy/ek55_assets \
     --frames-per-segment 8 --image-size 224 --workers 16
 
 # 先干跑看会跳过多少段：
