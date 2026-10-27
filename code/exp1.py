@@ -72,6 +72,10 @@ def parse_args():
                         help="证据头损失：edl=标准 Bayes risk；fisher=Fisher 加权（DUDE 形式）")
     parser.add_argument("--label-smoothing", type=float, default=0.01,
                         help="标签平滑；DUDE 用 0.7，但在 K=100+ 时会把目标压成近均匀")
+    parser.add_argument("--select-by", type=str, default="nll", choices=["nll", "ece", "accuracy"],
+                        help="早停选模型用的验证指标（EDL 的 val NLL 偏向欠自信模型，可改 accuracy/ece）")
+    parser.add_argument("--ce-weight", type=float, default=0.0,
+                        help="证据头损失里 CE 的权重（>0 时 EDL + w·CE，用来保住判别力）")
     parser.add_argument("--sigma", type=float, default=1.0,
                         help="Fisher 形式的 σ；默认 1.0 即去掉 1/(2σ²) 的 50 倍放大")
     parser.add_argument("--lambda-dist", type=float, default=0.0, help="L_dist 权重（有未来特征时才可用）")
@@ -263,6 +267,15 @@ def kl_dirichlet(alpha_a, alpha_b):
     return (log_beta_b - log_beta_a + ((alpha_a - alpha_b) * (digamma_diff - digamma_b_diff)).sum(dim=1, keepdim=True)).mean()
 
 
+def validation_metric(kind, probs, labels):
+    """早停用的验证指标。EDL 常因 val NLL 偏向欠自信模型，故允许按 ECE / accuracy 选。"""
+    if kind == "accuracy":
+        return -float((probs.argmax(axis=1) == labels).mean())     # 取负，仍是"越小越好"
+    if kind == "ece":
+        return float(ece_equal_width(probs, labels, 15))
+    return float(nll_score(probs, labels))
+
+
 # ===== 5. 训练与推理 =====
 
 def iterate_batches(x, y, batch_size, device, shuffle, generator=None, extra=None):
@@ -291,7 +304,7 @@ def train_baseline(model, bundle, args, device):
             optimizer.step()
         # 用验证集 NLL 早停（可信度任务里 NLL 比精度更适合做选择标准）
         val_probs = predict_baseline(model, bundle["x_val"], device)
-        val_nll = nll_score(val_probs, bundle["y_val"])
+        val_nll = validation_metric(args.select_by, val_probs, bundle["y_val"])
         if val_nll < best_val_nll:
             best_val_nll = val_nll
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
@@ -344,6 +357,10 @@ def train_evidence(model, bundle, args, device):
                                                                label_smoothing=args.label_smoothing)
             loss_inf = fisher_information_balance_loss(alpha)
             loss = loss_rec + args.lambda_inf * loss_inf
+            if args.ce_weight > 0.0:
+                # 用 Dirichlet 均值算 CE：log p = log α − log Σα
+                log_probs = torch.log(alpha) - torch.log(alpha.sum(dim=1, keepdim=True))
+                loss = loss + args.ce_weight * F.nll_loss(log_probs, targets)
             if has_future:
                 # KL 方向按原文写成 KL(Dir_g || Dir_p)，仍需回原文核对
                 alpha_global = future_model(future_features)
@@ -352,7 +369,7 @@ def train_evidence(model, bundle, args, device):
             optimizer.step()
         val_alpha = predict_evidence(model, bundle["x_val"], device)
         val_probs = dirichlet_mean(val_alpha)
-        val_nll = nll_score(val_probs, bundle["y_val"])
+        val_nll = validation_metric(args.select_by, val_probs, bundle["y_val"])
         if val_nll < best_val_nll:
             best_val_nll = val_nll
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
