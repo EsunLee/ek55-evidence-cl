@@ -50,12 +50,17 @@ echo "[python] $($PYTHON -V 2>&1)"
 echo "[磁盘] /home 与 /data 使用情况（产物必须写 /data 或 /tmp）："
 df -h /home /data /tmp 2>/dev/null | sed 's/^/        /'
 
+GPU_LIST="${GPU_LIST:-0,1,3}"
 if command -v nvidia-smi >/dev/null 2>&1; then
-  echo "[GPU] nvidia-smi 摘要（注意别用 GPU 2）："
-  nvidia-smi --query-gpu=index,name,memory.used,memory.total,utilization.gpu \
-             --format=csv,noheader 2>/dev/null | sed 's/^/        /'
-  echo "[GPU] 正在用卡的进程（共享机器，先看再决定）："
-  nvidia-smi --query-compute-apps=gpu_uuid,pid,used_memory --format=csv,noheader 2>/dev/null | sed 's/^/        /'
+  # 只逐张查询可用卡：本机万一有卡掉总线，整机查询会整体失败（历史故障：GPU 2, PCI 0000:67:00.0）
+  echo "[GPU] 只查可用卡（GPU_LIST=${GPU_LIST}）："
+  nvidia-smi -i "${GPU_LIST}" --query-gpu=index,name,memory.used,memory.total,utilization.gpu \
+             --format=csv,noheader 2>&1 | sed 's/^/        /'
+  echo "[GPU] 这些卡上的**计算**进程（桌面/远程控制不算）："
+  nvidia-smi -i "${GPU_LIST}" --query-compute-apps=gpu_uuid,pid,process_name,used_memory \
+             --format=csv,noheader 2>&1 | sed 's/^/        /'
+  echo "[GPU] 整机状态（若出现 Unable to determine the device handle = 某张卡掉总线，可忽略）："
+  nvidia-smi 2>&1 | grep -iE "unable|error" | head -3 | sed 's/^/        /'
 else
   echo "[GPU] 没有 nvidia-smi"
 fi
@@ -92,8 +97,14 @@ for path in "$DATA_ROOT" "$ANN_DIR"; do
   fi
 done
 
-echo "[找标注 CSV]（前 20 个，用于确认真实目录）"
-find /data/datasets/EPIC-KITCHENS -maxdepth 4 -name "*.csv" 2>/dev/null | head -20 | sed 's/^/        /' || true
+echo "[找标注 CSV]（限深度 3，避免长时间扫描）"
+find /data/datasets/EPIC-KITCHENS -maxdepth 3 -name "*.csv" 2>/dev/null | head -20 | sed 's/^/        /' || true
+if [ ! -d "${DATA_ROOT}" ]; then
+  echo "[找帧目录] --data-root 不存在，尝试定位 rgb_frames（限深度 4；若仍很慢可 Ctrl-C 跳过）："
+  find /data -maxdepth 4 -type d -name "rgb_frames" 2>/dev/null | head -5 | sed 's/^/        /'
+  echo "        备选：看 EPIC-KITCHENS 下体积最大的目录"
+  du -sh /data/datasets/EPIC-KITCHENS/* 2>/dev/null | sort -hr | head -8 | sed 's/^/        /'
+fi
 
 if [ -d "$DATA_ROOT" ]; then
   "$PYTHON" "$PROJECT_DIR/tools/inventory_data.py" \
