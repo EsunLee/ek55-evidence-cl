@@ -93,27 +93,117 @@ def load_segments(annotation_paths):
 
 # ===== 3. 帧路径解析 =====
 
-def detect_frame_pattern(frames_root, participant_id, video_id):
-    """在真实目录里探测帧文件命名（EK55 常见为 frame_0000000001.jpg）。"""
-    candidates = [
+def _has_frames(directory, probe=50):
+    """目录里是否有帧文件（只看前若干项，避免大目录全量 listdir）。"""
+    try:
+        with os.scandir(directory) as entries:
+            checked = 0
+            for entry in entries:
+                if entry.is_file() and entry.name.lower().endswith((".jpg", ".jpeg", ".png")):
+                    return True
+                checked += 1
+                if checked >= probe:
+                    break
+    except OSError:
+        return False
+    return False
+
+
+def candidate_dirs(frames_root, participant_id, video_id):
+    """按真实布局给出的候选目录（按优先级排列）。
+
+    已知真实布局（EPIC-KITCHENS 在 amax 上）：
+        <root>/<participant>/rgb_frames/<video_id>/frame_0000000001.jpg
+    同时也兼容"帧平铺在一个 rgb_frames 里"的历史布局。
+    """
+    return [
+        os.path.join(frames_root, participant_id, "rgb_frames", video_id),
         os.path.join(frames_root, participant_id, video_id),
-        os.path.join(frames_root, f"{participant_id}_{video_id}"),
+        os.path.join(frames_root, participant_id, "rgb_frames"),
         os.path.join(frames_root, video_id),
         frames_root,
     ]
-    for directory in candidates:
-        if not os.path.isdir(directory):
+
+
+def detect_frame_pattern(frames_root, participant_id, video_id, max_extra_depth=3):
+    """返回 (目录, 前缀, 帧号位数, 扩展名)。找不到返回四个 None。
+
+    先按候选路径找；再在 <root>/<participant> 下做**限深**搜索（避免全树扫描）。
+    """
+    for directory in candidate_dirs(frames_root, participant_id, video_id):
+        if os.path.isdir(directory) and _has_frames(directory):
+            return describe_frame_dir(directory)
+
+    base = os.path.join(frames_root, participant_id)
+    if os.path.isdir(base):
+        for current, subdirs, files in os.walk(base):
+            depth = current[len(base):].count(os.sep)
+            if depth >= max_extra_depth:
+                subdirs[:] = []
+            if video_id and video_id in os.path.basename(current) and _has_frames(current):
+                return describe_frame_dir(current)
+    return None, None, None, None
+
+
+def describe_frame_dir(directory):
+    """从一个真实存在的帧目录里解析命名规则（前缀/位数/扩展名）。"""
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return None, None, None, None
+    for name in names:
+        if not name.lower().endswith((".jpg", ".jpeg", ".png")):
             continue
-        for name in sorted(os.listdir(directory))[:20]:
-            if not name.lower().endswith((".jpg", ".jpeg", ".png")):
-                continue
-            stem, extension = os.path.splitext(name)          # 扩展名不能混进前缀
-            prefix = "".join(ch for ch in stem if not ch.isdigit())
-            digits = "".join(ch for ch in stem if ch.isdigit())
-            if not digits:                                    # 文件名里没有帧号，无法按帧号定位
-                continue
+        stem, extension = os.path.splitext(name)
+        prefix = "".join(ch for ch in stem if not ch.isdigit())
+        digits = "".join(ch for ch in stem if ch.isdigit())
+        if digits:
             return directory, prefix, len(digits), extension
     return None, None, None, None
+
+
+def count_frames(directory):
+    """数目录里的图片数（只用 scandir，不做 stat；大目录下也快）。"""
+    total = 0
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.is_file() and entry.name.lower().endswith((".jpg", ".jpeg", ".png")):
+                    total += 1
+    except OSError:
+        pass
+    return total
+
+
+def probe_layout(frames_root, pairs):
+    """探针：对给定的 `participant:video` 列表打印脚本**实际会用的**目录与命名。
+
+    用途：在不生成任何文件的前提下，确认布局与帧号能否正确定位。
+    """
+    print("[探针] 报告脚本实际解析到的目录（不写任何文件）")
+    for pair in pairs:
+        if ":" in pair:
+            participant_id, video_id = pair.split(":", 1)
+        else:
+            participant_id, video_id = pair, ""
+        print(f"\n  ── {participant_id}:{video_id or '(未指定)'} ──")
+        for directory in candidate_dirs(frames_root, participant_id, video_id):
+            exists = os.path.isdir(directory)
+            marker = "✅" if exists else "  "
+            extra = f"（图片 {count_frames(directory)} 张）" if exists else ""
+            print(f"    {marker} 候选: {directory} {extra}")
+        directory, prefix, digits, extension = detect_frame_pattern(frames_root, participant_id, video_id)
+        if directory is None:
+            print("    ❌ 未找到可用帧目录——请把上面候选里存在的那个路径发我")
+            continue
+        total = count_frames(directory)
+        first = frame_path(directory, prefix, digits, extension, 1)
+        print(f"    → 采用: {directory}")
+        print(f"      命名: 前缀 '{prefix}' + {digits} 位数字 + '{extension}'；该目录共 {total} 张")
+        print(f"      探测第 1 帧是否存在: {'✅ 存在' if os.path.isfile(first) else '❌ 不存在'}  ({first})")
+        if video_id and video_id not in os.path.basename(directory):
+            print("      ⚠️ 注意：目录名不含 video_id → 可能是多视频**平铺**在同一目录，"
+                  "帧号会串（不同视频都从 1 开始），需要你确认")
 
 
 def frame_path(directory, pattern_prefix, digits, extension, index):
@@ -197,18 +287,29 @@ def save_one_segment(segment, frames_root, out_dir, frames_per_segment, image_si
 
 def main():
     parser = argparse.ArgumentParser(description="生成 EK55 可搬运资产（采样帧 + 段表）")
-    parser.add_argument("--annotations", nargs="+", required=True, help="标注 CSV（可多个：train/val/test）")
+    parser.add_argument("--annotations", nargs="*", default=[], help="标注 CSV（可多个：train/val/test）；探针模式可省略")
     parser.add_argument("--frames-root", required=True, help="EK55 帧根目录")
-    parser.add_argument("--out-dir", required=True, help="产物目录（建议 /data/... 下）")
+    parser.add_argument("--out-dir", default=None, help="产物目录（建议 /data/... 下）；探针模式可省略")
     parser.add_argument("--frames-per-segment", type=int, default=8)
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--limit", type=int, default=0, help="只处理前 N 段（调试用，0 表示全部）")
     parser.add_argument("--dry-run", action="store_true", help="只报告，不写文件")
+    parser.add_argument("--probe", type=str, default=None,
+                        help='探针模式：只报告会用到哪些帧目录，如 --probe "P01:P01_01,P02:P02_03"')
     parser.add_argument("--with-features", action="store_true",
                         help="同时提 CLIP 特征（需要 torch 与 GPU；默认关闭）")
     args = parser.parse_args()
 
+    if args.probe:
+        probe_layout(args.frames_root, args.probe.split(","))
+        return 0
+    if not args.out_dir:
+        print("[错误] 非探针模式必须给 --out-dir")
+        return 1
+    if not args.annotations:
+        print("[错误] 非探针模式必须给 --annotations")
+        return 1
     for path in args.annotations:
         if not os.path.isfile(path):
             print(f"[错误] 找不到标注文件：{path}")
