@@ -157,11 +157,14 @@ class EvidenceHead(nn.Module):
             in_features=dim,
             out_features=n_classes,
         )
-        self.u_log = nn.Parameter(torch.zeros(n_classes))     # 初始 û = 0 → u = 1（跨类共享）
+        # 先验参数化：u = 1 + softplus(u_log) **保证 u >= 1**
+        # 为什么不能用 exp(u_log)：它没有下界，训练中学到的先验可能掉到 1 以下，
+        # 使 α0 < K、vacuity = K/α0 > 1，失去"空虚度"的意义（实测踩过：mean_vacuity = 1.45）。
+        self.u_log = nn.Parameter(torch.full((n_classes,), -4.0))   # softplus(-4)≈0.018 → u≈1.018
 
     def forward(self, features):
         evidence = F.relu(self.evidence_fc(features))
-        prior = torch.exp(self.u_log)
+        prior = 1.0 + F.softplus(self.u_log)
         alpha = evidence + prior
         return features, alpha
 

@@ -260,6 +260,8 @@ def main():
     parser.add_argument("--forbid-dataset-root", type=str, default="/data/datasets/EPIC-KITCHENS")
     parser.add_argument("--allow-dataset-write", action="store_true")
     parser.add_argument("--val-ratio", type=float, default=0.2, help="从 train 视频里切多少比例做早停验证集")
+    parser.add_argument("--label-space", choices=["verb", "noun", "action"], default="verb",
+                        help="标签空间：verb（125 类，推荐先做）/ noun（352 类）/ action（verb×noun 对，2000+ 类最难）")
     args = parser.parse_args()
 
     guard_dataset_write(args.out, args.forbid_dataset_root, args.allow_dataset_write)
@@ -311,17 +313,25 @@ def main():
         all_pairs += [tuple(pair) for pair in val_data["pairs"]]
     if test_data is not None:
         all_pairs += [tuple(pair) for pair in test_data["pairs"]]
-    class_list = sorted(set(all_pairs))                       # 稳定顺序，可复现
-    class_index = {pair: index for index, pair in enumerate(class_list)}
-    to_labels = lambda data: np.array([class_index[tuple(pair)] for pair in data["pairs"]], dtype=np.int64)
+    # 标签空间：verb / noun / action（标准 EK55 预测评测是 verb 与 noun 分开报）
+    if args.label_space == "verb":
+        key_of = lambda pair: int(pair[0])
+    elif args.label_space == "noun":
+        key_of = lambda pair: int(pair[1])
+    else:
+        key_of = lambda pair: (int(pair[0]), int(pair[1]))
+    class_list = sorted(set(key_of(pair) for pair in all_pairs))   # 稳定顺序，可复现
+    class_index = {key: index for index, key in enumerate(class_list)}
+    to_labels = lambda data: np.array([class_index[key_of(pair)] for pair in data["pairs"]], dtype=np.int64)
     train_labels, val_labels, test_labels = to_labels(train_data), None, None
     if val_data is not None:
         val_labels = to_labels(val_data)
     if test_data is not None:
         test_labels = to_labels(test_data)
-    train_classes = set(tuple(pair) for pair in train_data["pairs"])
-    unseen_test = sorted(set(tuple(pair) for pair in test_data["pairs"]) - train_classes) if test_data is not None else []
-    print(f"    动作类（verb×noun 对）共 {len(class_list)} 个；test 中未在 train 出现的类 {len(unseen_test)} 个")
+    train_classes = set(key_of(pair) for pair in train_data["pairs"])
+    unseen_test = sorted(set(key_of(pair) for pair in test_data["pairs"]) - train_classes) if test_data is not None else []
+    print(f"    标签空间 [{args.label_space}]：类数 {len(class_list)}；"
+          f"test 中未在 train 出现的类 {len(unseen_test)} 个")
     payload = {
         "x_train": train_data["x"],
         "x_seq_train": train_data["x_seq"],
@@ -350,8 +360,9 @@ def main():
         "past": args.past,
         "future": args.future,
         "window_rule": "过去=past 段（不含目标）；未来=future 段（含目标）；标签=目标段动作类",
-        "label_rule": "连续索引，映射表见本 meta 的 classes 字段（[verb_class, noun_class] 对，按字典序）",
-        "classes": [[int(v), int(n)] for v, n in class_list],
+        "label_space": args.label_space,
+        "label_rule": "连续索引；语义见本 meta 的 classes 字段（verb→verb_class；noun→noun_class；action→[verb,noun]）",
+        "classes": [list(item) if isinstance(item, tuple) else int(item) for item in class_list],
         "num_classes": len(class_list),
         "test_classes_unseen_in_train": [[int(v), int(n)] for v, n in unseen_test],
         "pooling": "token 均值 → 帧均值（x_* 为池化向量；x_seq_* 保留序列）",
