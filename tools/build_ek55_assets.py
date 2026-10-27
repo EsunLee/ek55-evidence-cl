@@ -42,7 +42,7 @@ except ImportError:
 
 # EK55 官方标注里我们需要的列（不同版本列名可能不同，故做同义词匹配）
 COLUMN_ALIASES = {
-    "narration_id": ["narration_id", "narration id", "id"],
+    "narration_id": ["narration_id", "narration id", "uid", "id"],
     "video_id": ["video_id", "video id", "video"],
     "participant_id": ["participant_id", "participant id", "participant"],
     "start_frame": ["start_frame", "start frame"],

@@ -21,7 +21,7 @@ VIDEO_SUFFIXES = (".mp4", ".MP4", ".mkv", ".avi", ".webm")
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
 # EK55 官方标注里我们关心的列（用于判断"这是不是能直接用的标注"）
 # 必备列（缺一不可）
-REQUIRED_COLUMNS = ["narration_id", "participant_id", "video_id"]
+REQUIRED_COLUMNS = ["narration_id|uid", "participant_id", "video_id"]
 # 二选一列（官方 CSV 用 timestamp；转换后的数据集可能只保留 frame 号）
 ALTERNATIVE_COLUMNS = [
     ("start_timestamp", "start_frame"),
@@ -145,7 +145,10 @@ def scan_annotations(annotations_dir):
             info["file"] = os.path.relpath(full_path, annotations_dir)
             info["bytes"] = os.path.getsize(full_path)
             columns = info.get("columns", [])
-            missing_required = [col for col in REQUIRED_COLUMNS if col not in columns]
+            missing_required = [
+                col for col in REQUIRED_COLUMNS
+                if not any(candidate in columns for candidate in col.split("|"))
+            ]
             missing_alternatives = [
                 "/".join(pair) for pair in ALTERNATIVE_COLUMNS
                 if not any(candidate in columns for candidate in pair)
