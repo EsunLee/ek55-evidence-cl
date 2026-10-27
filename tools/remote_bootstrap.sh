@@ -22,7 +22,7 @@ PYTHON="${PYTHON:-/data/conda_envs/insight_env/bin/python}"
 GPU_ID="${GPU_ID:-0}"
 DATA_ROOT="${1:-/data/datasets/EPIC-KITCHENS/rgb_frames}"
 ANN_DIR="${2:-/data/datasets/EPIC-KITCHENS/insight_annotations}"
-OUT_DIR="${3:-/data/datasets/EPIC-KITCHENS/ckpt_assets}"
+OUT_DIR="${3:-/data/ldy/ek55_assets}"          # 产物写自己的目录，绝不写共享数据集
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPORT="$PROJECT_DIR/results/bootstrap_$(date +%Y%m%d_%H%M%S).txt"
 mkdir -p "$PROJECT_DIR/results"

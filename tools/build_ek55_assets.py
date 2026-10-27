@@ -52,6 +52,24 @@ COLUMN_ALIASES = {
 }
 
 
+def guard_dataset_write(target_path, dataset_root="/data/datasets/EPIC-KITCHENS", allow=False):
+    """护栏：禁止把产物写进共享数据集目录（数据集是多人共用，只读）。
+
+    默认拦截 dataset_root 下的任何写入；确实需要时显式传 --allow-dataset-write。
+    """
+    if allow or not dataset_root:
+        return
+    resolved = os.path.abspath(target_path)
+    root = os.path.abspath(dataset_root)
+    if resolved == root or resolved.startswith(root + os.sep):
+        raise SystemExit(
+            f"[护栏] 拒绝写入共享数据集目录：{resolved}\n"
+            f"        数据集根：{root}（多人共用，只读）\n"
+            f"        请把产物写到自己的项目目录（例如 /data/ldy/ek55_assets），"
+            f"确实要写数据集目录时加 --allow-dataset-write"
+        )
+
+
 # ===== 2. 标注读取与列名归一 =====
 
 def normalize_row(row, mapping):
@@ -297,6 +315,9 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="只报告，不写文件")
     parser.add_argument("--probe", type=str, default=None,
                         help='探针模式：只报告会用到哪些帧目录，如 --probe "P01:P01_01,P02:P02_03"')
+    parser.add_argument("--forbid-dataset-root", type=str, default="/data/datasets/EPIC-KITCHENS",
+                        help="禁止写入的共享数据集根目录（护栏）")
+    parser.add_argument("--allow-dataset-write", action="store_true", help="显式允许写数据集目录（不推荐）")
     parser.add_argument("--with-features", action="store_true",
                         help="同时提 CLIP 特征（需要 torch 与 GPU；默认关闭）")
     args = parser.parse_args()
@@ -305,8 +326,9 @@ def main():
         probe_layout(args.frames_root, args.probe.split(","))
         return 0
     if not args.out_dir:
-        print("[错误] 非探针模式必须给 --out-dir")
+        print("[错误] 非探针模式必须给 --out-dir（写到自己的目录，例如 /data/ldy/ek55_assets）")
         return 1
+    guard_dataset_write(args.out_dir, args.forbid_dataset_root, args.allow_dataset_write)
     if not args.annotations:
         print("[错误] 非探针模式必须给 --annotations")
         return 1

@@ -36,6 +36,17 @@ def looks_like_participant(name):
     return bool(re.fullmatch(r"P\d{1,2}", name or ""))
 
 
+def guard_dataset_write(target_path, dataset_root="/data/datasets/EPIC-KITCHENS", allow=False):
+    """护栏：禁止把产物写进共享数据集目录（多人共用，只读）。"""
+    if allow or not dataset_root:
+        return
+    resolved = os.path.abspath(target_path)
+    root = os.path.abspath(dataset_root)
+    if resolved == root or resolved.startswith(root + os.sep):
+        raise SystemExit(f"[护栏] 拒绝写入共享数据集目录：{resolved}\n"
+                         f"        请写到自己的项目目录（例如项目内 data/ 或 /data/ldy/ek55_assets）")
+
+
 # ===== 2. 目录扫描 =====
 
 def scan_videos(data_root):
@@ -210,6 +221,8 @@ def main():
     parser.add_argument("--data-root", type=str, required=True, help="EK55 数据根目录（含 P01/P02... 或 frames/）")
     parser.add_argument("--annotations", type=str, default=None, help="标注 CSV 所在目录（epic-kitchens/annotations）")
     parser.add_argument("--out", type=str, default=None, help="输出 JSON（默认写到项目 data/inventory_<时间戳>.json）")
+    parser.add_argument("--forbid-dataset-root", type=str, default="/data/datasets/EPIC-KITCHENS")
+    parser.add_argument("--allow-dataset-write", action="store_true")
     parser.add_argument("--top", type=int, default=10, help="打印体积最大的前 N 个 participant")
     args = parser.parse_args()
 
@@ -254,6 +267,7 @@ def main():
         "data",
         f"inventory_{time.strftime('%Y%m%d_%H%M%S')}.json",
     )
+    guard_dataset_write(out_path, args.forbid_dataset_root, args.allow_dataset_write)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, ensure_ascii=False, indent=2)

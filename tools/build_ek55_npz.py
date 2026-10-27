@@ -42,6 +42,24 @@ try:
 except ImportError:
     torch = None                      # 纯逻辑测试（build_windows）不依赖 torch
 
+def guard_dataset_write(target_path, dataset_root="/data/datasets/EPIC-KITCHENS", allow=False):
+    """护栏：禁止把产物写进共享数据集目录（数据集是多人共用，只读）。
+
+    默认拦截 dataset_root 下的任何写入；确实需要时显式传 --allow-dataset-write。
+    """
+    if allow or not dataset_root:
+        return
+    resolved = os.path.abspath(target_path)
+    root = os.path.abspath(dataset_root)
+    if resolved == root or resolved.startswith(root + os.sep):
+        raise SystemExit(
+            f"[护栏] 拒绝写入共享数据集目录：{resolved}\n"
+            f"        数据集根：{root}（多人共用，只读）\n"
+            f"        请把产物写到自己的项目目录（例如 /data/ldy/ek55_assets），"
+            f"确实要写数据集目录时加 --allow-dataset-write"
+        )
+
+
 # ===== 1. 读段表 =====
 
 REQUIRED_COLUMNS = ["uid", "video_id", "start_frame", "stop_frame", "verb_class", "noun_class"]
@@ -237,9 +255,12 @@ def main():
     parser.add_argument("--future", type=int, default=8)
     parser.add_argument("--video-limit", type=int, default=0, help="每个划分只取前 N 个视频（试跑用）")
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--forbid-dataset-root", type=str, default="/data/datasets/EPIC-KITCHENS")
+    parser.add_argument("--allow-dataset-write", action="store_true")
     parser.add_argument("--val-ratio", type=float, default=0.2, help="从 train 视频里切多少比例做早停验证集")
     args = parser.parse_args()
 
+    guard_dataset_write(args.out, args.forbid_dataset_root, args.allow_dataset_write)
     if np is None or torch is None:
         raise SystemExit("[错误] 需要 numpy 与 torch（请用 /data/conda_envs/insight_env/bin/python）")
 
