@@ -1,0 +1,31 @@
+# ===== 缓存与系统杂项 =====
+__pycache__/
+*.pyc
+.DS_Store
+.tmp*/
+.venv/
+venv/
+node_modules/
+
+# ===== 数据、帧与模型产物（大文件，绝不入库）=====
+data/frames/
+data/*.npz
+*.npz
+*.pth
+*.pt
+*.tar
+*.tar.gz
+*.zip
+*.mp4
+*.avi
+
+# ===== 说明 =====
+# 本仓库的根 = 项目目录本身，远端为 GitHub 私有仓库 https://github.com/EsunLee/ek55-evidence-cl
+# （2026-10-27 起：仓库根不再是上层「论文/」目录；那时用的白名单式 .gitignore 已随旧仓库废弃）
+#
+# 追踪  ：code/*.py、tools/*.py|*.sh、*.md（README/RUNBOOK/AGENTS/data/runs/results 约定）、
+#         results/*.json（环境与实验记录）、runs/*.txt
+# 不追踪：数据集与帧、模型权重、特征 npz、系统杂项
+#
+# 服务器上克隆：git clone git@github.com:EsunLee/ek55-evidence-cl.git
+# 注意：仓库是私有的，服务器需要自己的 SSH key 或令牌才能 clone。
