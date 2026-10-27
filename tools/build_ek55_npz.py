@@ -123,6 +123,21 @@ def build_windows(ordered_segments, past=30, future=8, has_feature=None):
     return samples, stats
 
 
+def split_videos(video_ids, val_ratio=0.2):
+    """把视频列表确定性切成 (train, val)。
+
+    规则写死并写进 meta：按名字排序后**每 N 个取 1 个**进 val（N = round(1/val_ratio)），
+    这样同一份数据每次跑出的划分完全一致（可复现），且按视频划分（不跨界泄漏）。
+    """
+    ordered = sorted(video_ids)
+    if val_ratio <= 0 or len(ordered) < 5:
+        return ordered, []
+    stride = max(2, int(round(1.0 / val_ratio)))
+    val = [name for index, name in enumerate(ordered) if index % stride == stride - 1]
+    train = [name for name in ordered if name not in set(val)]
+    return train, val
+
+
 # ===== 3. 特征读取与池化 =====
 
 def pool_feature_file(path):
@@ -222,6 +237,7 @@ def main():
     parser.add_argument("--future", type=int, default=8)
     parser.add_argument("--video-limit", type=int, default=0, help="每个划分只取前 N 个视频（试跑用）")
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--val-ratio", type=float, default=0.2, help="从 train 视频里切多少比例做早停验证集")
     args = parser.parse_args()
 
     if np is None or torch is None:
@@ -246,20 +262,25 @@ def main():
                 target_set.add(name.rsplit("_", 1)[0])
     if not val_videos:
         print("    [警告] 未发现 val 特征目录——所有数据都进 train 划分（后续自行按视频划分）")
-    train_segments = [s for s in segments if s["video_id"] in train_videos] or segments
-    val_segments = [s for s in segments if s["video_id"] in val_videos]
-    print(f"    划分：train {len(train_segments)} 段 / {len(train_videos)} 视频；"
-          f"val {len(val_segments)} 段 / {len(val_videos)} 视频")
+    # 三段划分（避免"早停用验证集 = 报告用测试集"的泄漏）：
+    #   train/val 都取自 features/train 的视频（按视频 8:2 切）
+    #   test      用 features/val 的视频（完全留出，仅用于最终报告）
+    fit_videos, inner_val_videos = split_videos(train_videos, val_ratio=args.val_ratio)
+    train_segments = [s for s in segments if s["video_id"] in set(fit_videos)] or segments
+    val_segments = [s for s in segments if s["video_id"] in set(inner_val_videos)]
+    test_segments = [s for s in segments if s["video_id"] in val_videos]
+    print(f"    划分：train {len(train_segments)} 段/{len(fit_videos)} 视频；"
+          f"val {len(val_segments)} 段/{len(inner_val_videos)} 视频（早停用）；"
+          f"test {len(test_segments)} 段/{len(val_videos)} 视频（留出报告用）")
 
     print("[2/4] 处理 train 划分")
     train_data = collect_split(train_segments, args.features_train, args.past, args.future,
                                args.workers, args.video_limit)
-    print("[3/4] 处理 val 划分")
-    if val_segments:
-        val_data = collect_split(val_segments, args.features_val, args.past, args.future,
-                                 args.workers, args.video_limit)
-    else:
-        val_data = None
+    print("[3/4] 处理 val（早停用）与 test（留出）划分")
+    val_data = collect_split(val_segments, args.features_train, args.past, args.future,
+                             args.workers, args.video_limit) if val_segments else None
+    test_data = collect_split(test_segments, args.features_val, args.past, args.future,
+                              args.workers, args.video_limit) if test_segments else None
 
     print("[4/4] 落盘")
     payload = {
@@ -275,6 +296,13 @@ def main():
             "x_future_val": val_data["x_future"],
             "y_val": val_data["y"],
         })
+    if test_data is not None:
+        payload.update({
+            "x_test": test_data["x"],
+            "x_seq_test": test_data["x_seq"],
+            "x_future_test": test_data["x_future"],
+            "y_test": test_data["y"],
+        })
     meta = {
         "labels": os.path.abspath(args.labels),
         "features_train": os.path.abspath(args.features_train),
@@ -287,6 +315,9 @@ def main():
         "pooling": "token 均值 → 帧均值（x_* 为池化向量；x_seq_* 保留序列）",
         "train_samples": int(len(train_data["y"])),
         "val_samples": int(len(val_data["y"])) if val_data is not None else 0,
+        "test_samples": int(len(test_data["y"])) if test_data is not None else 0,
+        "split_rule": "train/val 取自 features/train 的视频（按名字排序每 1/val_ratio 取 1 进 val）；"
+                      "test 用 features/val 的视频完全留出",
         "train_window_stats": train_data["stats"],
         "val_window_stats": val_data["stats"] if val_data is not None else None,
         "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
