@@ -66,7 +66,14 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--lambda-inf", type=float, default=0.1, help="L_inf 权重（待核实：原文未给具体形式）")
+    parser.add_argument("--lambda-inf", type=float, default=0.0,
+                        help="L_inf（trigamma 信息平衡）权重；默认 0，先跑纯 EDL 再逐步加")
+    parser.add_argument("--loss", type=str, default="edl", choices=["edl", "fisher"],
+                        help="证据头损失：edl=标准 Bayes risk；fisher=Fisher 加权（DUDE 形式）")
+    parser.add_argument("--label-smoothing", type=float, default=0.01,
+                        help="标签平滑；DUDE 用 0.7，但在 K=100+ 时会把目标压成近均匀")
+    parser.add_argument("--sigma", type=float, default=1.0,
+                        help="Fisher 形式的 σ；默认 1.0 即去掉 1/(2σ²) 的 50 倍放大")
     parser.add_argument("--lambda-dist", type=float, default=0.0, help="L_dist 权重（有未来特征时才可用）")
     parser.add_argument("--n-bins", type=int, default=15)
     parser.add_argument("--seed", type=int, default=0)
@@ -192,6 +199,22 @@ class FutureEvidence(nn.Module):
 
 # ===== 4. 损失 =====
 
+def edl_bayes_risk_loss(alpha, targets, n_classes, label_smoothing=0.01):
+    """EDL 标准 Bayes risk（Sensoy et al. 2018）：拟合项 + Dirichlet 方差项。
+
+    为什么加上它：全量 verb 上原始实现（Fisher 加权 + smoothing=0.7 + 1/(2σ²)=50 倍）
+    把目标压平了 —— accuracy 掉 3.5pp、ECE 翻倍、但排序 AUROC 反而更好，
+    这是典型的「被训练成不敢表态」。标准形式先用温和的标签平滑（0.01）作对照。
+    """
+    strength = alpha.sum(dim=1, keepdim=True)
+    probs = alpha / strength
+    one_hot = F.one_hot(targets, num_classes=n_classes).float()
+    smoothed = one_hot * (1.0 - label_smoothing) + label_smoothing / n_classes
+    error_term = (smoothed - probs) ** 2
+    variance_term = probs * (1.0 - probs) / (strength + 1.0)
+    return (error_term + variance_term).sum(dim=1).mean()
+
+
 def fisher_weighted_reconstruction_loss(alpha, targets, n_classes, sigma=0.1, label_smoothing=0.7):
     """L_rec（DUDE 形式）：Fisher 信息加权的重构项。
 
@@ -312,7 +335,13 @@ def train_evidence(model, bundle, args, device):
             optimizer.zero_grad()
             _, alpha = model(features)
             # DUDE 的 L_UDR = L_var + L_rec + L_inf；σ 固定时 L_var 对参数为常数，故略去
-            loss_rec = fisher_weighted_reconstruction_loss(alpha, targets, args.n_classes)
+            if args.loss == "edl":
+                loss_rec = edl_bayes_risk_loss(alpha, targets, args.n_classes,
+                                               label_smoothing=args.label_smoothing)
+            else:
+                loss_rec = fisher_weighted_reconstruction_loss(alpha, targets, args.n_classes,
+                                                               sigma=args.sigma,
+                                                               label_smoothing=args.label_smoothing)
             loss_inf = fisher_information_balance_loss(alpha)
             loss = loss_rec + args.lambda_inf * loss_inf
             if has_future:
