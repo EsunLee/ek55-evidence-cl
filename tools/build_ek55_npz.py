@@ -364,7 +364,8 @@ def main():
         "label_rule": "连续索引；语义见本 meta 的 classes 字段（verb→verb_class；noun→noun_class；action→[verb,noun]）",
         "classes": [list(item) if isinstance(item, tuple) else int(item) for item in class_list],
         "num_classes": len(class_list),
-        "test_classes_unseen_in_train": [[int(v), int(n)] for v, n in unseen_test],
+        "test_classes_unseen_in_train": [list(item) if isinstance(item, tuple) else int(item)
+                                         for item in unseen_test],
         "pooling": "token 均值 → 帧均值（x_* 为池化向量；x_seq_* 保留序列）",
         "train_samples": int(len(train_labels)),
         "val_samples": int(len(val_labels)) if val_labels is not None else 0,
