@@ -231,14 +231,16 @@ def collect_split(segments, features_dir, past, future, workers, limit=0):
 
     past_stack = np.stack([item[0] for item in results]).astype(np.float16)
     future_stack = np.stack([item[1] for item in results]).astype(np.float16)
-    labels = np.array([sample["target"]["verb_class"] * 1000 + sample["target"]["noun_class"]
-                       for sample in all_samples], dtype=np.int64)
+    # 注意：这里返回 (verb, noun) **对**，不拼成大整数——否则 verb*1000+noun 会把类空间
+    # 撑到 12 万量级，线性分类头会直接爆掉。连续索引在 main 里统一建立。
+    pairs = np.array([[sample["target"]["verb_class"], sample["target"]["noun_class"]]
+                      for sample in all_samples], dtype=np.int64)
     pooled = past_stack.mean(axis=1).astype(np.float32)
     return {
         "x": pooled,
         "x_seq": past_stack,
         "x_future": future_stack,
-        "y": labels,
+        "pairs": pairs,
         "stats": stats_total,
         "uids": [sample["target"]["uid"] for sample in all_samples],
     }
@@ -303,26 +305,42 @@ def main():
     test_data = collect_split(test_segments, args.features_val, args.past, args.future,
                               args.workers, args.video_limit) if test_segments else None
 
-    print("[4/4] 落盘")
+    print("[4/4] 建立连续类索引并落盘")
+    all_pairs = [tuple(pair) for pair in train_data["pairs"]]
+    if val_data is not None:
+        all_pairs += [tuple(pair) for pair in val_data["pairs"]]
+    if test_data is not None:
+        all_pairs += [tuple(pair) for pair in test_data["pairs"]]
+    class_list = sorted(set(all_pairs))                       # 稳定顺序，可复现
+    class_index = {pair: index for index, pair in enumerate(class_list)}
+    to_labels = lambda data: np.array([class_index[tuple(pair)] for pair in data["pairs"]], dtype=np.int64)
+    train_labels, val_labels, test_labels = to_labels(train_data), None, None
+    if val_data is not None:
+        val_labels = to_labels(val_data)
+    if test_data is not None:
+        test_labels = to_labels(test_data)
+    train_classes = set(tuple(pair) for pair in train_data["pairs"])
+    unseen_test = sorted(set(tuple(pair) for pair in test_data["pairs"]) - train_classes) if test_data is not None else []
+    print(f"    动作类（verb×noun 对）共 {len(class_list)} 个；test 中未在 train 出现的类 {len(unseen_test)} 个")
     payload = {
         "x_train": train_data["x"],
         "x_seq_train": train_data["x_seq"],
         "x_future_train": train_data["x_future"],
-        "y_train": train_data["y"],
+        "y_train": train_labels,
     }
     if val_data is not None:
         payload.update({
             "x_val": val_data["x"],
             "x_seq_val": val_data["x_seq"],
             "x_future_val": val_data["x_future"],
-            "y_val": val_data["y"],
+            "y_val": val_labels,
         })
     if test_data is not None:
         payload.update({
             "x_test": test_data["x"],
             "x_seq_test": test_data["x_seq"],
             "x_future_test": test_data["x_future"],
-            "y_test": test_data["y"],
+            "y_test": test_labels,
         })
     meta = {
         "labels": os.path.abspath(args.labels),
@@ -332,11 +350,14 @@ def main():
         "past": args.past,
         "future": args.future,
         "window_rule": "过去=past 段（不含目标）；未来=future 段（含目标）；标签=目标段动作类",
-        "label_rule": "verb_class * 1000 + noun_class",
+        "label_rule": "连续索引，映射表见本 meta 的 classes 字段（[verb_class, noun_class] 对，按字典序）",
+        "classes": [[int(v), int(n)] for v, n in class_list],
+        "num_classes": len(class_list),
+        "test_classes_unseen_in_train": [[int(v), int(n)] for v, n in unseen_test],
         "pooling": "token 均值 → 帧均值（x_* 为池化向量；x_seq_* 保留序列）",
-        "train_samples": int(len(train_data["y"])),
-        "val_samples": int(len(val_data["y"])) if val_data is not None else 0,
-        "test_samples": int(len(test_data["y"])) if test_data is not None else 0,
+        "train_samples": int(len(train_labels)),
+        "val_samples": int(len(val_labels)) if val_labels is not None else 0,
+        "test_samples": int(len(test_labels)) if test_labels is not None else 0,
         "split_rule": "train/val 取自 features/train 的视频（按名字排序每 1/val_ratio 取 1 进 val）；"
                       "test 用 features/val 的视频完全留出",
         "train_window_stats": train_data["stats"],
