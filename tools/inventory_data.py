@@ -12,6 +12,7 @@
 import argparse
 import json
 import os
+import re
 import time
 
 # ===== 1. 常量 =====
@@ -28,6 +29,11 @@ ALTERNATIVE_COLUMNS = [
     ("verb", "verb_class"),
     ("noun", "noun_class"),
 ]
+
+
+def looks_like_participant(name):
+    """判断一个目录名是否形如 participant（P01、P12）。"""
+    return bool(re.fullmatch(r"P\d{1,2}", name or ""))
 
 
 # ===== 2. 目录扫描 =====
@@ -57,17 +63,24 @@ def scan_videos(data_root):
 
 
 def scan_frames(data_root):
-    """统计预提帧：目录形如 <root>/P01/P01_01/frame_0000000001.jpg，或 <root>/frames/...。"""
+    """统计预提帧，并区分"真实文件"与"符号链接"。
+
+    为什么要区分：真实数据里出现过"同一层既有 per-video 子目录、又有平铺的符号链接"，
+    不区分会让体积/数量统计翻倍（本工具踩过这个坑）。
+    """
     per_video = {}
     total_images = 0
+    total_symlinks = 0
     for current_dir, _, filenames in os.walk(data_root):
         images = [name for name in filenames if name.endswith(IMAGE_SUFFIXES)]
         if not images:
             continue
         key = os.path.relpath(current_dir, data_root)
-        per_video[key] = len(images)
+        links = sum(1 for name in images if os.path.islink(os.path.join(current_dir, name)))
+        per_video[key] = {"images": len(images), "symlinks": links}
         total_images += len(images)
-    return per_video, total_images
+        total_symlinks += links
+    return per_video, total_images, total_symlinks
 
 
 def read_csv_header_and_rows(path, max_rows=200000):
@@ -89,6 +102,26 @@ def read_csv_header_and_rows(path, max_rows=200000):
     return {"columns": columns, "rows": rows}
 
 
+def summarize_json(path):
+    """JSON 标注只报结构（条数/字段/键），不做列校验。"""
+    info = {"bytes": os.path.getsize(path)}
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            data = json.load(handle)
+        if isinstance(data, list):
+            info["entries"] = len(data)
+            if data and isinstance(data[0], dict):
+                info["sample_keys"] = sorted(data[0].keys())[:12]
+        elif isinstance(data, dict):
+            info["keys"] = sorted(data.keys())[:12]
+            first_list = next((value for value in data.values() if isinstance(value, list)), None)
+            if first_list is not None:
+                info["first_list_length"] = len(first_list)
+    except (OSError, ValueError) as error:
+        info["error"] = str(error)
+    return info
+
+
 def scan_annotations(annotations_dir):
     """列出标注目录里的 CSV，并判断哪些文件含我们需要的列。"""
     found = []
@@ -96,7 +129,16 @@ def scan_annotations(annotations_dir):
         return found
     for current_dir, _, filenames in os.walk(annotations_dir):
         for name in sorted(filenames):
-            if not name.lower().endswith(".csv"):
+            lower = name.lower()
+            if lower.endswith(".json"):
+                info = summarize_json(os.path.join(current_dir, name))
+                info["file"] = os.path.relpath(os.path.join(current_dir, name), annotations_dir)
+                info["kind"] = "json"
+                info["has_expected_columns"] = False
+                info["missing_columns"] = ["(JSON：需人工核对字段结构)"]
+                found.append(info)
+                continue
+            if not lower.endswith(".csv"):
                 continue
             full_path = os.path.join(current_dir, name)
             info = read_csv_header_and_rows(full_path)
@@ -127,10 +169,14 @@ def participants_from_frames(frames_per_video):
     return sorted(found)
 
 
-def build_warnings(videos_per_participant, video_files, frames_per_video, annotations):
+def build_warnings(videos_per_participant, video_files, frames_per_video, annotations, data_root=""):
     warnings = []
     participants = sorted(set([key for key in videos_per_participant if key.startswith("P")]
                               + participants_from_frames(frames_per_video)))
+    # 以单个 participant 目录为 --data-root 时（如 .../P01），目录名本身就是 participant
+    root_name = os.path.basename(os.path.normpath(data_root))
+    if looks_like_participant(root_name) and root_name not in participants:
+        participants = sorted(set(participants + [root_name]))
     if not participants:
         warnings.append("没有找到形如 P01 的 participant 目录：确认 --data-root 指向的是 EK55 的根目录")
     elif len(participants) < 32:
@@ -170,10 +216,14 @@ def main():
 
     print(f"[扫描] {args.data_root}（只看文件名与体积，不解码视频）")
     videos_per_participant, video_files, video_bytes = scan_videos(args.data_root)
-    frames_per_video, frame_images = scan_frames(args.data_root)
+    frames_per_video, frame_images, frame_symlinks = scan_frames(args.data_root)
     annotations = scan_annotations(args.annotations) if args.annotations else []
-    warnings = build_warnings(videos_per_participant, video_files, frames_per_video, annotations)
+    warnings = build_warnings(videos_per_participant, video_files, frames_per_video, annotations,
+                              data_root=args.data_root)
     frame_participants = participants_from_frames(frames_per_video)
+    root_name = os.path.basename(os.path.normpath(args.data_root))
+    if looks_like_participant(root_name) and root_name not in frame_participants:
+        frame_participants = sorted(set(frame_participants + [root_name]))
 
     summary = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -188,6 +238,7 @@ def main():
         "frames": {
             "directories": len(frames_per_video),
             "images": frame_images,
+            "symlinks": frame_symlinks,
             "participants": frame_participants,
         },
         "per_participant": videos_per_participant,
@@ -207,10 +258,15 @@ def main():
     # --- 打印人类可读摘要 ---
     print(f"\n视频：{video_files} 个文件，{summary['videos']['gigabytes']} GB，"
           f"覆盖 {summary['videos']['participants']} 个 participant")
-    print(f"帧  ：{frame_images} 张图片，分布在 {len(frames_per_video)} 个目录，"
-          f"覆盖 {len(frame_participants)} 个 participant"
+    print(f"帧  ：{frame_images} 张图片（其中符号链接 {frame_symlinks} 张），"
+          f"分布在 {len(frames_per_video)} 个目录，覆盖 {len(frame_participants)} 个 participant"
           + (f"（{frame_participants[0]}–{frame_participants[-1]}）" if frame_participants else ""))
-    print(f"标注：{len(annotations)} 个 CSV（其中 {sum(1 for a in annotations if a.get('has_expected_columns'))} 个含完整列）")
+    if frame_symlinks:
+        print("      注：符号链接通常是「平铺副本」，统计体积时会翻倍，算存储时只算真实文件")
+    csv_count = sum(1 for a in annotations if a.get("kind") != "json")
+    json_count = sum(1 for a in annotations if a.get("kind") == "json")
+    print(f"标注：{csv_count} 个 CSV（{sum(1 for a in annotations if a.get('has_expected_columns'))} 个含完整列）"
+          f" + {json_count} 个 JSON（只报结构）")
     largest = sorted(videos_per_participant.items(), key=lambda item: item[1]["bytes"], reverse=True)[: args.top]
     if largest:
         print(f"\n体积最大的 {len(largest)} 个 participant：")
