@@ -1,0 +1,134 @@
+{
+  "script": "exp1.py",
+  "timestamp": "20261027_180126",
+  "seed": 0,
+  "args": {
+    "features": "/data/ldy/ek55_assets/ek55_verb_full.npz",
+    "synthetic": false,
+    "n_classes": 106,
+    "dim": 1024,
+    "n_train": 8000,
+    "n_val": 2000,
+    "n_test": 2000,
+    "epochs": 50,
+    "batch_size": 128,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "lambda_inf": 0.0,
+    "loss": "edl",
+    "label_smoothing": 0.01,
+    "select_by": "accuracy",
+    "ce_weight": 1.0,
+    "sigma": 1.0,
+    "lambda_dist": 0.0,
+    "n_bins": 15,
+    "seed": 0,
+    "out_dir": null
+  },
+  "env": {
+    "timestamp": "2026-10-27 18:01:26",
+    "hostname": "amax",
+    "platform": "Linux-5.4.0-152-generic-x86_64-with-glibc2.28",
+    "python": "3.10.20",
+    "executable": "/data/conda_envs/insight_env/bin/python",
+    "code": {
+      "repo_root": "/data/ldy/ek55-evidence-cl",
+      "is_git_repo": true,
+      "commit": "ebcafa1",
+      "branch": "main",
+      "dirty": true
+    },
+    "torch": "2.5.1+cu118",
+    "cuda_available": true,
+    "cuda_version": "11.8",
+    "gpu_count": 1,
+    "gpu_names": [
+      "NVIDIA GeForce RTX 3090"
+    ],
+    "gpu_memory_gb": [
+      23.7
+    ],
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "sklearn": "1.7.0"
+  },
+  "data": {
+    "source": "/data/ldy/ek55_assets/ek55_verb_full.npz",
+    "sha1": "24de252697e5",
+    "n_train": 13857,
+    "n_test": 1486,
+    "dim": 1024,
+    "n_classes": 106
+  },
+  "baseline": {
+    "accuracy": 0.20928667563930015,
+    "ece_equal_width": 0.058352317718585275,
+    "ece_adaptive": 0.07790720801615583,
+    "brier": 0.8940769128844647,
+    "nll": 2.8734154189070393,
+    "auroc_confidence": 0.5570034890880482,
+    "auprc_confidence": 0.239554920335674,
+    "aurc": 0.7671431241470826,
+    "accuracy_at_80pct_coverage": 0.2220353238015139,
+    "temperature": 1.1,
+    "ece_after_temperature": 0.039360327927135154
+  },
+  "evidence": {
+    "accuracy": 0.20255720053835802,
+    "ece_equal_width": 0.03617353705855292,
+    "ece_adaptive": 0.04843234262119128,
+    "brier": 0.9173564255451946,
+    "nll": 3.476022292317938,
+    "auroc_confidence": 0.5066094733448281,
+    "auprc_confidence": 0.2304018800079634,
+    "aurc": 0.7773521116097263,
+    "accuracy_at_80pct_coverage": 0.2043734230445753,
+    "auroc_vacuity": 0.5094579250599268,
+    "auroc_conflict": 0.5117905154407951,
+    "mean_vacuity": 0.5477529601527137,
+    "mean_conflict": 0.8834096464913336,
+    "temperature": 0.8,
+    "ece_after_temperature": 0.06551762706384476
+  },
+  "matched_comparison": {
+    "target_accuracy": 0.20928667563930015,
+    "baseline_coverage": 0.0531628532974428,
+    "evidence_coverage": 0.020188425302826378,
+    "baseline_selective_ece": 0.4124050188259164,
+    "evidence_selective_ece": 0.06292993895601012
+  },
+  "low_evidence_bucket": {
+    "baseline": {
+      "bucket": 9,
+      "score_range": [
+        0.8159012785986374,
+        0.8498424773791172
+      ],
+      "count": 149,
+      "accuracy": 0.174496644295302,
+      "ece": 0.00281368550905875,
+      "mean_confidence": 0.17168295878624326
+    },
+    "evidence": {
+      "bucket": 9,
+      "score_range": [
+        0.5755007845073181,
+        0.602604086355905
+      ],
+      "count": 149,
+      "accuracy": 0.20134228187919462,
+      "ece": 0.032081344955012664,
+      "mean_confidence": 0.16926093692418195
+    }
+  },
+  "decomposition": {},
+  "val_nll": {
+    "baseline": -0.2673942701227831,
+    "evidence": -0.26193724420190995
+  },
+  "seconds": {
+    "baseline": 5.7113213539123535,
+    "evidence": 10.743238687515259
+  },
+  "conclusion": "证据头未显示实质可信度改善：需要检查损失（如 L_inf 形式）或特征质量"
+}

@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-10-27 16:44:06",
+  "hostname": "amax",
+  "platform": "Linux-5.4.0-152-generic-x86_64-with-glibc2.28",
+  "python": "3.10.20",
+  "executable": "/data/conda_envs/insight_env/bin/python",
+  "code": {
+    "repo_root": "/data/ldy/ek55-evidence-cl",
+    "is_git_repo": true,
+    "commit": "711d94f",
+    "branch": "main",
+    "dirty": true
+  },
+  "torch": "2.5.1+cu118",
+  "cuda_available": true,
+  "cuda_version": "11.8",
+  "gpu_count": 3,
+  "gpu_names": [
+    "NVIDIA GeForce RTX 3090",
+    "NVIDIA GeForce RTX 3090",
+    "NVIDIA GeForce RTX 3090"
+  ],
+  "gpu_memory_gb": [
+    23.7,
+    23.7,
+    23.7
+  ],
+  "numpy": "2.2.6",
+  "scipy": "1.15.3",
+  "sklearn": "1.7.0"
+}

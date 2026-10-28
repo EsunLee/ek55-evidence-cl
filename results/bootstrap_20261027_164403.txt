@@ -1,0 +1,32 @@
+======================================================================
+ remote_bootstrap @ amax  2026-10-27 16:44:03
+ 项目目录：/data/ldy/ek55-evidence-cl
+ 解释器  ：/data/conda_envs/insight_env/bin/python
+======================================================================
+
+---------- ① 环境 ----------
+[python] Python 3.10.20
+[磁盘] /home 与 /data 使用情况（产物必须写 /data 或 /tmp）：
+        Filesystem      Size  Used Avail Use% Mounted on
+        /dev/sda7       244G  182G   50G  79% /home
+        /dev/sdb1       3.6T  3.1T  348G  91% /data
+        /dev/sda6       187G   66G  112G  37% /
+[GPU] nvidia-smi 摘要（注意别用 GPU 2）：
+        Unable to determine the device handle for GPU 0000:67:00.0: Unknown Error
+[GPU] 正在用卡的进程（共享机器，先看再决定）：
+        Unable to determine the device handle for GPU 0000:67:00.0: Unknown Error
+[torch] 探测（仅用 GPU 0，几秒）：
+        /data/conda_envs/insight_env/lib/python3.10/site-packages/torch/cuda/__init__.py:716: UserWarning: Can't initialize NVML
+          warnings.warn("Can't initialize NVML")
+        torch 2.5.1+cu118 | cuda_available True | cuda_version 11.8
+        device NVIDIA GeForce RTX 3090 | memory_gb 23.7
+        矩阵乘自检通过： True
+[环境 JSON] 写入 results/：
+          warnings.warn("Can't initialize NVML")
+        [落盘] /data/ldy/ek55-evidence-cl/results/env_20261027_164409.json
+
+---------- ② 数据清点 ----------
+[检查路径]
+        ❌ 不存在：/data/datasets/EPIC-KITCHENS/rgb_frames  ← 需要你确认真实路径后重跑
+        ✅ 存在：/data/datasets/EPIC-KITCHENS/insight_annotations
+[找标注 CSV]（前 20 个，用于确认真实目录）
