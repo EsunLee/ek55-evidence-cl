@@ -1,0 +1,80 @@
+{
+  "features": "/data/ldy/ek55_assets/ek55_verb_full.npz",
+  "readout": "lastk-5",
+  "groups": 40,
+  "uncertainty": "margin",
+  "fine_accuracy": 0.14535666218034993,
+  "coarse_accuracy": 0.29475100942126514,
+  "rows": [
+    {
+      "alpha": 0.0,
+      "fixed": 0.14535666218034993,
+      "uncertainty": 0.14535666218034993,
+      "oracle": 0.14535666218034993,
+      "gain_uncertainty_vs_fixed": 0.0,
+      "gap_to_oracle": 0.0
+    },
+    {
+      "alpha": 0.1,
+      "fixed": 0.16285329744279947,
+      "uncertainty": 0.15612382234185734,
+      "oracle": 0.24562584118438763,
+      "gain_uncertainty_vs_fixed": -0.006729475100942128,
+      "gap_to_oracle": 0.08950201884253028
+    },
+    {
+      "alpha": 0.2,
+      "fixed": 0.1810228802153432,
+      "uncertainty": 0.1695827725437416,
+      "oracle": 0.3452220726783311,
+      "gain_uncertainty_vs_fixed": -0.011440107671601613,
+      "gap_to_oracle": 0.1756393001345895
+    },
+    {
+      "alpha": 0.3,
+      "fixed": 0.18842530282637954,
+      "uncertainty": 0.1816958277254374,
+      "oracle": 0.3465679676985195,
+      "gain_uncertainty_vs_fixed": -0.006729475100942128,
+      "gap_to_oracle": 0.1648721399730821
+    },
+    {
+      "alpha": 0.5,
+      "fixed": 0.21534320323014805,
+      "uncertainty": 0.21399730820995963,
+      "oracle": 0.32772543741588156,
+      "gain_uncertainty_vs_fixed": -0.0013458950201884201,
+      "gap_to_oracle": 0.11372812920592193
+    },
+    {
+      "alpha": 0.7,
+      "fixed": 0.24764468371467024,
+      "uncertainty": 0.23283983849259757,
+      "oracle": 0.3135935397039031,
+      "gain_uncertainty_vs_fixed": -0.014804845222072677,
+      "gap_to_oracle": 0.08075370121130551
+    },
+    {
+      "alpha": 0.9,
+      "fixed": 0.2819650067294751,
+      "uncertainty": 0.2671601615074024,
+      "oracle": 0.29946164199192465,
+      "gain_uncertainty_vs_fixed": -0.014804845222072704,
+      "gap_to_oracle": 0.03230148048452225
+    },
+    {
+      "alpha": 1.0,
+      "fixed": 0.29475100942126514,
+      "uncertainty": 0.29475100942126514,
+      "oracle": 0.29475100942126514,
+      "gain_uncertainty_vs_fixed": 0.0,
+      "gap_to_oracle": 0.0
+    }
+  ],
+  "wins": 0,
+  "inner_points": 6,
+  "mean_gain": -0.009309107222969945,
+  "best_hybrid_accuracy": 0.2671601615074024,
+  "verdict": "不确定度驱动**未优于**固定比例",
+  "seed": 0
+}
