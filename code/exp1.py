@@ -82,6 +82,9 @@ def parse_args():
                         help="Fisher 形式的 σ；默认 1.0 即去掉 1/(2σ²) 的 50 倍放大")
     parser.add_argument("--lambda-dist", type=float, default=0.0, help="L_dist 权重（有未来特征时才可用）")
     parser.add_argument("--n-bins", type=int, default=15)
+    parser.add_argument("--readout", type=str, default="mean", choices=["mean", "lastk", "attention"],
+                        help="时序读出：mean=用已池化向量（旧行为）；lastk=最后 k 段均值；attention=注意力池化")
+    parser.add_argument("--last-k", type=int, default=5, help="lastk 读出的 k")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out-dir", type=str, default=None)
     return parser.parse_args()
@@ -105,6 +108,9 @@ def load_features(path):
         "y_val": data["y_val"].astype(np.int64),
         "x_test": data["x_test"].astype(np.float32),
         "y_test": data["y_test"].astype(np.int64),
+        "seq_train": data["x_seq_train"].astype(np.float32) if "x_seq_train" in data else None,
+        "seq_val": data["x_seq_val"].astype(np.float32) if "x_seq_val" in data else None,
+        "seq_test": data["x_seq_test"].astype(np.float32) if "x_seq_test" in data else None,
         "x_future_train": data["x_future_train"].astype(np.float32) if "x_future_train" in data else None,
         "novel_mask_test": data["novel_mask_test"].astype(bool) if "novel_mask_test" in data else None,
     }
@@ -292,6 +298,60 @@ def iterate_batches(x, y, batch_size, device, shuffle, generator=None, extra=Non
         yield batch
 
 
+class LastKPool(nn.Module):
+    """取最后 k 段做均值：最朴素的"重近轻远"读出，无参数。"""
+
+    def __init__(self, k=5):
+        super().__init__()
+        self.k = k
+
+    def forward(self, sequence):
+        k = min(self.k, sequence.shape[1])
+        return sequence[:, sequence.shape[1] - k:, :].mean(dim=1)
+
+
+class AttentionPool(nn.Module):
+    """注意力池化：[B,S,D] → [B,D]。
+
+    参数很少（一个投影 + 一个查询向量），配合冻结骨干正好：只学"该看哪几段"。
+    """
+
+    def __init__(self, dim, hidden=128):
+        super().__init__()
+        self.project = nn.Linear(dim, hidden)
+        self.query = nn.Parameter(torch.zeros(hidden))
+        self.scale = hidden ** -0.5
+
+    def forward(self, sequence):
+        projected = torch.tanh(self.project(sequence))        # [B,S,H]
+        scores = projected @ self.query * self.scale          # [B,S]
+        weights = torch.softmax(scores, dim=1)
+        pooled = (weights.unsqueeze(-1) * sequence).sum(dim=1)
+        return pooled
+
+
+class ReadoutWrapper(nn.Module):
+    """先做时序读出，再交给原来的头；返回值形状与原头一致（features, logits/alpha）。"""
+
+    def __init__(self, pool, head):
+        super().__init__()
+        self.pool = pool
+        self.head = head
+
+    def forward(self, sequence):
+        pooled = self.pool(sequence)
+        return self.head(pooled)
+
+
+def wrap_readout(head, args, dim):
+    """按 --readout 决定是否给头套一层时序读出。mean 时原样返回（保持旧行为完全不变）。"""
+    if args.readout == "mean":
+        return head
+    if args.readout == "lastk":
+        return ReadoutWrapper(LastKPool(args.last_k), head)
+    return ReadoutWrapper(AttentionPool(dim), head)
+
+
 def train_baseline(model, bundle, args, device):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     best_state = None
@@ -461,16 +521,23 @@ def main():
         observed_max = max(bundle["y_train"].max(), bundle["y_val"].max(), bundle["y_test"].max())
         args.n_classes = int(observed_max + 1)
     dim = int(bundle["x_train"].shape[1])
+    if args.readout != "mean":
+        for split_name in ("train", "val", "test"):
+            sequence = bundle.get(f"seq_{split_name}")
+            if sequence is None:
+                raise SystemExit(f"[错误] --readout {args.readout} 需要 x_seq_{split_name}，当前 npz 缺该字段")
+            bundle[f"x_{split_name}"] = sequence
+        print(f"[读出] {args.readout}：输入形状 {tuple(bundle['x_train'].shape)}")
     print(f"[数据] 训练 {len(bundle['y_train'])} / 验证 {len(bundle['y_val'])} / 测试 {len(bundle['y_test'])}"
           f"，维度 {dim}，类别 {args.n_classes}，设备 {device}")
 
     # --- 7.1 训练两个头 ---
-    baseline_model = LinearHead(dim=dim, n_classes=args.n_classes).to(device)
+    baseline_model = wrap_readout(LinearHead(dim=dim, n_classes=args.n_classes), args, dim).to(device)
     started = time.time()
     baseline_model, baseline_val_nll = train_baseline(baseline_model, bundle, args, device)
     baseline_seconds = time.time() - started
 
-    evidence_model = EvidenceHead(dim=dim, n_classes=args.n_classes).to(device)
+    evidence_model = wrap_readout(EvidenceHead(dim=dim, n_classes=args.n_classes), args, dim).to(device)
     started = time.time()
     evidence_model, evidence_val_nll = train_evidence(evidence_model, bundle, args, device)
     evidence_seconds = time.time() - started
@@ -574,6 +641,7 @@ def main():
         "script": os.path.basename(__file__),
         "timestamp": stamp,
         "seed": args.seed,
+        "readout": args.readout,
         "args": vars(args),
         "env": collect_env(),                   # 三种机器（Windows/macOS/AutoDL）都要能追溯
         "data": {
