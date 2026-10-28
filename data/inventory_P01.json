@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-10-27 17:01:04",
+  "data_root": "/data/datasets/EPIC-KITCHENS/P01",
+  "annotations_dir": "/data/datasets/EPIC-KITCHENS/insight_annotations_clean_v2",
+  "videos": {
+    "files": 0,
+    "bytes": 0,
+    "gigabytes": 0.0,
+    "participants": 0
+  },
+  "frames": {
+    "directories": 20,
+    "images": 1224764,
+    "participants": []
+  },
+  "per_participant": {},
+  "annotations": [],
+  "warnings": [
+    "没有找到形如 P01 的 participant 目录：确认 --data-root 指向的是 EK55 的根目录",
+    "没有找到视频文件：若你只有预提帧，可忽略；否则确认路径或扩展名",
+    "没有找到同时含 narration_id/participant_id/video_id/start_timestamp/stop_timestamp/verb/noun 的标注 CSV：请从 epic-kitchens/annotations 仓库补齐"
+  ]
+}
