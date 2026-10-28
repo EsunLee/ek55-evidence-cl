@@ -42,6 +42,8 @@ from metrics import (
     ece_adaptive,
     ece_equal_width,
     fit_temperature,
+    fit_vector_scaling,
+    apply_vector_scaling,
     nll_score,
     softmax,
 )
@@ -490,6 +492,18 @@ def main():
     evidence_temperature, _ = fit_temperature(np.log(np.clip(evidence_val_probs, 1e-12, None)), bundle["y_val"])
     baseline_report["temperature"] = float(baseline_temperature)
     evidence_report["temperature"] = float(evidence_temperature)
+    # A2 对照补强：向量缩放（按类缩放+偏置，比温度缩放更强的事后基线）
+    baseline_scale, baseline_bias = fit_vector_scaling(
+        np.log(np.clip(baseline_val_probs, 1e-12, None)), bundle["y_val"])
+    evidence_scale, evidence_bias = fit_vector_scaling(
+        np.log(np.clip(evidence_val_probs, 1e-12, None)), bundle["y_val"])
+    baseline_report["ece_after_vector_scaling"] = ece_equal_width(
+        apply_vector_scaling(np.log(np.clip(baseline_probs, 1e-12, None)), baseline_scale, baseline_bias),
+        labels, args.n_bins)
+    evidence_report["ece_after_vector_scaling"] = ece_equal_width(
+        apply_vector_scaling(np.log(np.clip(evidence_probs, 1e-12, None)), evidence_scale, evidence_bias),
+        labels, args.n_bins)
+
     baseline_report["ece_after_temperature"] = ece_equal_width(
         softmax(np.log(np.clip(baseline_probs, 1e-12, None)), baseline_temperature), labels, args.n_bins)
     evidence_report["ece_after_temperature"] = ece_equal_width(
@@ -516,7 +530,8 @@ def main():
 
     # --- 7.6 打印对照表 ---
     keys = ["accuracy", "ece_equal_width", "ece_adaptive", "brier", "nll",
-            "auroc_confidence", "aurc", "accuracy_at_80pct_coverage", "ece_after_temperature"]
+            "auroc_confidence", "aurc", "accuracy_at_80pct_coverage",
+            "ece_after_temperature", "ece_after_vector_scaling"]
     print("\n================ 可信度对照（测试集）================")
     print(f"{'指标':<28}{'线性基线':>14}{'证据头':>14}")
     for key in keys:

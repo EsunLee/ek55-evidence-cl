@@ -221,6 +221,54 @@ def fit_temperature(logits, labels, grid=None):
 
 # ===== 6. Dirichlet 证据读出 =====
 
+def fit_vector_scaling(logits, labels, steps=400, learning_rate=0.05, weight_decay=1e-3):
+    """按类学习缩放 a_c 与偏置 b_c：z_c = a_c·logit_c + b_c。
+
+    为什么需要它：温度缩放在**所有类上共用一个参数**，是最弱的事后校准；
+    向量缩放（per-class）是更强的事后基线。如果证据头连它都能赢，
+    "证据头带来的是事后校准做不到的东西"这个结论才站得住。
+    用验证集拟合（与温度缩放同口径），在测试集上评估。
+    """
+    logits = np.asarray(logits, dtype=np.float64)
+    labels = np.asarray(labels)
+    n_samples, n_classes = logits.shape
+    scale = np.ones(n_classes, dtype=np.float64)
+    bias = np.zeros(n_classes, dtype=np.float64)
+    one_hot = np.eye(n_classes)[labels]
+
+    m_scale = np.zeros(n_classes); v_scale = np.zeros(n_classes)
+    m_bias = np.zeros(n_classes); v_bias = np.zeros(n_classes)
+    beta1, beta2, eps = 0.9, 0.999, 1e-8
+
+    for step in range(1, steps + 1):
+        z = logits * scale + bias
+        z = z - z.max(axis=1, keepdims=True)
+        p = np.exp(z)
+        p = p / p.sum(axis=1, keepdims=True)
+
+        grad = (p - one_hot) / n_samples                 # dNLL/dz
+        grad_scale = (grad * logits).sum(axis=0) + weight_decay * (scale - 1.0)
+        grad_bias = grad.sum(axis=0)
+
+        for parameter, gradient, m, v in ((scale, grad_scale, m_scale, v_scale),
+                                          (bias, grad_bias, m_bias, v_bias)):
+            m *= beta1
+            m += (1.0 - beta1) * gradient
+            v *= beta2
+            v += (1.0 - beta2) * gradient * gradient
+            m_hat = m / (1.0 - beta1 ** step)
+            v_hat = v / (1.0 - beta2 ** step)
+            parameter -= learning_rate * m_hat / (np.sqrt(v_hat) + eps)
+
+    return scale, bias
+
+
+def apply_vector_scaling(logits, scale, bias):
+    """把学到的 a_c / b_c 应用到 logits 上，返回归一化概率。"""
+    z = np.asarray(logits, dtype=np.float64) * np.asarray(scale) + np.asarray(bias)
+    return softmax(z, 1.0)
+
+
 def dirichlet_mean(alpha):
     alpha = np.asarray(alpha, dtype=np.float64)
     return alpha / alpha.sum(axis=1, keepdims=True)
