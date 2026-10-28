@@ -126,6 +126,43 @@ def evaluate(fine_probs, coarse_probs, fine_labels, group_labels, alphas,
     }
 
 
+def evaluate_confidence(fine_probs, coarse_probs, fine_labels, group_labels,
+                        uncertainty, seed=0):
+    """B1'：按"跨粒度置信度比较"决定走粗 —— 这是决策论上正确的判据。
+
+    规则：若 p_coarse_max > p_fine_max（对"哪个组"比对"哪个类"更有把握），就走粗。
+    直觉：细粒度没把握时退一步更划算。该判据不需要扫 α，阈值是自然的。
+    为了让结果可比，在**同一个 α_eff** 下与 固定比例 / 不确定度驱动 / oracle 对照。
+    """
+    fine_correct = fine_probs.argmax(axis=1) == fine_labels
+    coarse_correct = coarse_probs.argmax(axis=1) == group_labels
+    confidence_mask = coarse_probs.max(axis=1) > fine_probs.max(axis=1)
+    alpha_eff = float(confidence_mask.mean())
+    n_samples = len(fine_labels)
+    count = int(round(alpha_eff * n_samples))
+
+    rng = np.random.default_rng(seed)
+    result = {
+        "alpha_eff": alpha_eff,
+        "confidence": hybrid_accuracy(fine_correct, coarse_correct, confidence_mask),
+    }
+    orders = {
+        "fixed": rng.permutation(n_samples),
+        "uncertainty": np.argsort(-uncertainty),
+        "oracle": np.argsort(-(coarse_correct & ~fine_correct).astype(np.float64)),
+    }
+    for name, order in orders.items():
+        mask = np.zeros(n_samples, dtype=bool)
+        mask[order[:count]] = True
+        result[name] = hybrid_accuracy(fine_correct, coarse_correct, mask)
+
+    result["gain_vs_fixed"] = result["confidence"] - result["fixed"]
+    result["gain_vs_uncertainty"] = result["confidence"] - result["uncertainty"]
+    result["gain_vs_fine"] = result["confidence"] - float(fine_correct.mean())
+    result["gap_to_oracle"] = result["oracle"] - result["confidence"]
+    return result
+
+
 # ===== 4. 主流程 =====
 
 def main():
@@ -200,8 +237,25 @@ def main():
           f"（{best_uncertainty - baseline:+.4f}）")
     print(f"  [结论] {verdict}")
 
+    # B1'：跨粒度置信度判据
+    confidence_result = evaluate_confidence(fine_probs, coarse_probs, test_y, test_group,
+                                            uncertainty, seed=args.seed)
+    print("\n" + "=" * 78)
+    print(f"B1'：跨粒度置信度判据（自然阈值 α_eff = {confidence_result['alpha_eff']:.3f}）")
+    print("=" * 78)
+    print(f"  confidence（p_coarse > p_fine 就走粗） {confidence_result['confidence']:.4f}")
+    print(f"  同 α 下 固定比例                     {confidence_result['fixed']:.4f}"
+          f"（差 {confidence_result['gain_vs_fixed']:+.4f}）")
+    print(f"  同 α 下 不确定度驱动                 {confidence_result['uncertainty']:.4f}"
+          f"（差 {confidence_result['gain_vs_uncertainty']:+.4f}）")
+    print(f"  同 α 下 oracle                       {confidence_result['oracle']:.4f}"
+          f"（距 {confidence_result['gap_to_oracle']:+.4f}）")
+    print(f"  相对细粒度基线 {result['fine_accuracy']:.4f}"
+          f"（{confidence_result['gain_vs_fine']:+.4f}）")
+
     payload = {
         "features": os.path.abspath(args.features),
+        "confidence_rule": confidence_result,
         "readout": readout,
         "groups": args.groups,
         "uncertainty": args.uncertainty,
