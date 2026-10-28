@@ -182,8 +182,19 @@ def group_level_comparison(fine_probs, coarse_probs, test_y, test_group,
     oracle = float((fine_ok | coarse_ok).mean())          # 上界：每样本都选对的那一级
     headroom = oracle - max(fine_accuracy, coarse_accuracy)
 
-    # 路由规则：逐样本选"校准后置信度更高"的那一级
-    choose_coarse = coarse_probs.max(axis=1) > fine_probs.max(axis=1)
+    # 判据①（旧，有逻辑错误）：比较"类级最大概率"与"组级最大概率"——两者不在同一层级
+    choose_coarse_naive = coarse_probs.max(axis=1) > fine_probs.max(axis=1)
+    routed_naive = float(np.where(choose_coarse_naive, coarse_ok, fine_ok).mean())
+
+    # 判据②（正确）：两边都换算成"组级"期望正确率
+    #   粗：p_coarse_max（在组任务上校准过）
+    #   细：fine 头在"所预测类所属组"上的概率质量之和（而不是类级最大值）
+    n_groups = int(group_of_class.max()) + 1
+    one_hot_group = np.eye(n_groups)[group_of_class]              # (K, G)
+    fine_group_probs = fine_probs @ one_hot_group                 # (N, G)
+    fine_pred = fine_probs.argmax(axis=1)
+    p_fine_group = fine_group_probs[np.arange(len(fine_pred)), group_of_class[fine_pred]]
+    choose_coarse = coarse_probs.max(axis=1) > p_fine_group
     routed = float(np.where(choose_coarse, coarse_ok, fine_ok).mean())
 
     # 同比例固定混合（对照组：不用置信度，随机挑同样比例走粗）
@@ -201,6 +212,8 @@ def group_level_comparison(fine_probs, coarse_probs, test_y, test_group,
         "oracle_group_accuracy": oracle,
         "headroom": headroom,
         "routed_accuracy": routed,
+        "routed_accuracy_naive": routed_naive,
+        "routed_coarse_ratio_naive": float(choose_coarse_naive.mean()),
         "routed_coarse_ratio": float(choose_coarse.mean()),
         "fixed_same_ratio_accuracy": fixed,
         "gain_routed_vs_best_single": routed - max(fine_accuracy, coarse_accuracy),
@@ -324,8 +337,11 @@ def main():
     print(f"  细粒度头映射到组              {group_result['fine_mapped_group_accuracy']:.4f}")
     print(f"  oracle（每样本选对的那一级）  {group_result['oracle_group_accuracy']:.4f}"
           f"  ← 可提升空间 {group_result['headroom']:+.4f}")
-    print(f"  置信度路由（{group_result['routed_coarse_ratio']:.1%} 走粗）"
-          f"    {group_result['routed_accuracy']:.4f}")
+    print(f"  路由②正确判据（{group_result['routed_coarse_ratio']:.1%} 走粗）"
+          f"  {group_result['routed_accuracy']:.4f}"
+          f"（增益 {group_result['gain_routed_vs_best_single']:+.4f}）")
+    print(f"  路由①旧判据（{group_result['routed_coarse_ratio_naive']:.1%} 走粗）"
+          f"  {group_result['routed_accuracy_naive']:.4f}")
     print(f"  同比例固定混合                {group_result['fixed_same_ratio_accuracy']:.4f}"
           f"（路由 − 固定 = {group_result['gain_routed_vs_fixed']:+.4f}）")
     cells = group_result["cells"]
