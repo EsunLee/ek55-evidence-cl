@@ -355,6 +355,7 @@ def main():
         print("  [结论] 可提升空间存在，但当前路由规则没抓到手 → 需要更好的选择器")
 
     payload = {
+        "class_to_group": [int(item) for item in group_of_class],
         "features": os.path.abspath(args.features),
         "group_level": group_result,
         "temperature_fine": float(temperature_fine),
