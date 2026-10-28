@@ -74,6 +74,8 @@ def parse_args():
                         help="ce_evi 模式下纯拟合项的权重（λ1）")
     parser.add_argument("--lambda-var", type=float, default=0.0,
                         help="ce_evi 模式下方差项的权重（λ2）；0 表示关闭")
+    parser.add_argument("--lambda-conc", type=float, default=0.0,
+                        help="浓度正则权重：把 α0 拉回 K 附近（推荐 0.01–1.0；0=关闭）")
     parser.add_argument("--var-topk", type=int, default=0,
                         help="方差项只压前 k 个候选类（0=全部；建议 5–10，避免压平整个分布）")
     parser.add_argument("--soft-label-beta", type=float, default=1.0,
@@ -264,6 +266,19 @@ def pure_fit_loss(alpha, targets, n_classes, sigma=1.0, soft_beta=1.0):
     fisher_weight = torch.polygamma(1, alpha)          # ψ⁽¹⁾(α_i)
     squared_error = (targets_soft - probs) ** 2
     return (squared_error * fisher_weight).sum(dim=1).div(2.0 * sigma ** 2).mean()
+
+
+def concentration_regularizer(alpha, n_classes):
+    """把总浓度 α0 拉回 K 附近，使 vacuity = K/α0 落在 ~1 的量级。
+
+    为什么必须有：步1 实测 L_fit 会把 α0 顶到极大（mean_vacuity 0.59 → 0.039），
+    后果是 (a) 方差项 p(1−p)/(α0+1) 恒为 0（步2 因此完全无效）；
+    (b) 模型过度自信，原始 ECE 反而比基线差（0.0620 vs 0.0513）。
+    这个正则只作用在浓度上，不碰均值的相对大小，因此不影响判别方向。
+    """
+    strength = alpha.sum(dim=1, keepdim=True)
+    log_strength = torch.log(strength.clamp_min(1e-6))
+    return (log_strength - float(np.log(n_classes))).pow(2).mean()
 
 
 def variance_penalty(alpha, topk=0):
@@ -497,6 +512,8 @@ def train_evidence(model, bundle, args, device):
                     loss = loss + args.lambda_fit * pure_fit_loss(
                         alpha, targets, args.n_classes,
                         sigma=args.sigma, soft_beta=args.soft_label_beta)
+                if args.lambda_conc > 0.0:
+                    loss = loss + args.lambda_conc * concentration_regularizer(alpha, args.n_classes)
                 if args.lambda_var > 0.0:
                     loss = loss + args.lambda_var * variance_penalty(alpha, topk=args.var_topk)
                 if args.lambda_inf > 0.0:
@@ -737,6 +754,7 @@ def main():
         "seed": args.seed,
         "readout": args.readout,
         "evidence_param": args.evidence_param,
+        "lambda_conc": args.lambda_conc,
         "args": vars(args),
         "env": collect_env(),                   # 三种机器（Windows/macOS/AutoDL）都要能追溯
         "data": {
