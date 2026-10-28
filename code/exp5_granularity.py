@@ -164,6 +164,56 @@ def evaluate_confidence(fine_probs, coarse_probs, fine_labels, group_labels,
     return result
 
 
+def group_level_comparison(fine_probs, coarse_probs, test_y, test_group,
+                           group_of_class, seed=0):
+    """把两级放到**同一个度量**（组级准确率）上比较。
+
+    为什么必须这样比：粗粒度头直接在"组"上预测，细粒度头在"类"上预测，
+    两者的原始准确率不可比（组少 → 天然更容易）。只有当
+        「粗粒度头的组准确率」≈「细粒度头映射到组的组准确率」
+    时，"在两级之间路由"才是一个有意义的问题；否则只是在两个难度不同的任务间插值。
+    """
+    fine_mapped = group_of_class[fine_probs.argmax(axis=1)]
+    fine_ok = fine_mapped == test_group
+    coarse_ok = coarse_probs.argmax(axis=1) == test_group
+
+    fine_accuracy = float(fine_ok.mean())
+    coarse_accuracy = float(coarse_ok.mean())
+    oracle = float((fine_ok | coarse_ok).mean())          # 上界：每样本都选对的那一级
+    headroom = oracle - max(fine_accuracy, coarse_accuracy)
+
+    # 路由规则：逐样本选"校准后置信度更高"的那一级
+    choose_coarse = coarse_probs.max(axis=1) > fine_probs.max(axis=1)
+    routed = float(np.where(choose_coarse, coarse_ok, fine_ok).mean())
+
+    # 同比例固定混合（对照组：不用置信度，随机挑同样比例走粗）
+    n_samples = len(test_y)
+    count = int(round(choose_coarse.mean() * n_samples))
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(n_samples)
+    mask = np.zeros(n_samples, dtype=bool)
+    mask[order[:count]] = True
+    fixed = float(np.where(mask, coarse_ok, fine_ok).mean())
+
+    return {
+        "fine_mapped_group_accuracy": fine_accuracy,
+        "coarse_group_accuracy": coarse_accuracy,
+        "oracle_group_accuracy": oracle,
+        "headroom": headroom,
+        "routed_accuracy": routed,
+        "routed_coarse_ratio": float(choose_coarse.mean()),
+        "fixed_same_ratio_accuracy": fixed,
+        "gain_routed_vs_best_single": routed - max(fine_accuracy, coarse_accuracy),
+        "gain_routed_vs_fixed": routed - fixed,
+        "cells": {
+            "both": float((fine_ok & coarse_ok).mean()),
+            "fine_only": float((fine_ok & ~coarse_ok).mean()),
+            "coarse_only": float((~fine_ok & coarse_ok).mean()),
+            "neither": float((~fine_ok & ~coarse_ok).mean()),
+        },
+    }
+
+
 # ===== 4. 主流程 =====
 
 def main():
@@ -264,8 +314,33 @@ def main():
     print(f"  相对细粒度基线 {result['fine_accuracy']:.4f}"
           f"（{confidence_result['gain_vs_fine']:+.4f}）")
 
+    # 同度量（组级）比较 —— 只有这个比较才能判断"路由"是否是真问题
+    group_result = group_level_comparison(fine_probs, coarse_probs, test_y, test_group,
+                                          group_of_class, seed=args.seed)
+    print("\n" + "=" * 78)
+    print("同一度量（组级准确率）下比较两级")
+    print("=" * 78)
+    print(f"  粗粒度头（直接预测组）        {group_result['coarse_group_accuracy']:.4f}")
+    print(f"  细粒度头映射到组              {group_result['fine_mapped_group_accuracy']:.4f}")
+    print(f"  oracle（每样本选对的那一级）  {group_result['oracle_group_accuracy']:.4f}"
+          f"  ← 可提升空间 {group_result['headroom']:+.4f}")
+    print(f"  置信度路由（{group_result['routed_coarse_ratio']:.1%} 走粗）"
+          f"    {group_result['routed_accuracy']:.4f}")
+    print(f"  同比例固定混合                {group_result['fixed_same_ratio_accuracy']:.4f}"
+          f"（路由 − 固定 = {group_result['gain_routed_vs_fixed']:+.4f}）")
+    cells = group_result["cells"]
+    print(f"  细分：都对 {cells['both']:.4f}｜只细对 {cells['fine_only']:.4f}｜"
+          f"只粗对 {cells['coarse_only']:.4f}｜都错 {cells['neither']:.4f}")
+    if group_result["headroom"] < 0.02:
+        print("  [结论] 可提升空间 < 2pp → **路由问题不成立**（两级已接近，或错在同一处）")
+    elif group_result["gain_routed_vs_fixed"] > 0.005:
+        print("  [结论] 路由**优于**固定混合 → 路由是真问题，值得继续")
+    else:
+        print("  [结论] 可提升空间存在，但当前路由规则没抓到手 → 需要更好的选择器")
+
     payload = {
         "features": os.path.abspath(args.features),
+        "group_level": group_result,
         "temperature_fine": float(temperature_fine),
         "temperature_coarse": float(temperature_coarse),
         "confidence_rule": confidence_result,
