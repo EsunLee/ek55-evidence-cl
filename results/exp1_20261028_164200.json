@@ -1,0 +1,147 @@
+{
+  "script": "exp1.py",
+  "timestamp": "20261028_164200",
+  "seed": 2,
+  "readout": "lastk",
+  "evidence_param": "mean",
+  "lambda_conc": 0.1,
+  "args": {
+    "features": "/data/ldy/ek55_assets/ek55_verb_full.npz",
+    "synthetic": false,
+    "n_classes": 106,
+    "dim": 1024,
+    "n_train": 8000,
+    "n_val": 2000,
+    "n_test": 2000,
+    "epochs": 30,
+    "batch_size": 128,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "lambda_inf": 0.0,
+    "lambda_fit": 0.1,
+    "lambda_var": 0.0,
+    "lambda_conc": 0.1,
+    "var_topk": 0,
+    "soft_label_beta": 1.0,
+    "evidence_param": "mean",
+    "loss": "ce_evi",
+    "label_smoothing": 0.01,
+    "select_by": "nll",
+    "ce_weight": 0.0,
+    "sigma": 1.0,
+    "lambda_dist": 0.0,
+    "n_bins": 15,
+    "readout": "lastk",
+    "last_k": 5,
+    "seed": 2,
+    "out_dir": null
+  },
+  "env": {
+    "timestamp": "2026-10-28 16:42:00",
+    "hostname": "amax",
+    "platform": "Linux-5.4.0-152-generic-x86_64-with-glibc2.28",
+    "python": "3.10.20",
+    "executable": "/data/conda_envs/insight_env/bin/python",
+    "code": {
+      "repo_root": "/data/ldy/ek55-evidence-cl",
+      "is_git_repo": true,
+      "commit": "779cce3",
+      "branch": "main",
+      "dirty": true
+    },
+    "torch": "2.5.1+cu118",
+    "cuda_available": true,
+    "cuda_version": "11.8",
+    "gpu_count": 1,
+    "gpu_names": [
+      "NVIDIA GeForce RTX 3090"
+    ],
+    "gpu_memory_gb": [
+      23.7
+    ],
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "sklearn": "1.7.0"
+  },
+  "data": {
+    "source": "/data/ldy/ek55_assets/ek55_verb_full.npz",
+    "sha1": "24de252697e5",
+    "n_train": 13857,
+    "n_test": 1486,
+    "dim": 1024,
+    "n_classes": 106
+  },
+  "baseline": {
+    "accuracy": 0.27254374158815614,
+    "ece_equal_width": 0.04221331516615841,
+    "ece_adaptive": 0.05385124654517411,
+    "brier": 0.8559552313335989,
+    "nll": 2.6382407158885863,
+    "auroc_confidence": 0.5865899201699387,
+    "auprc_confidence": 0.32414553714359484,
+    "aurc": 0.6844050816092728,
+    "accuracy_at_80pct_coverage": 0.29015979814970566,
+    "temperature": 1.1,
+    "ece_after_vector_scaling": 0.04230678443565491,
+    "ece_after_temperature": 0.024797511364567
+  },
+  "evidence": {
+    "accuracy": 0.26648721399730824,
+    "ece_equal_width": 0.043886424679767104,
+    "ece_adaptive": 0.050859680363451495,
+    "brier": 0.8491102390666904,
+    "nll": 2.604555826353539,
+    "auroc_confidence": 0.6179200259475489,
+    "auprc_confidence": 0.3697162404914974,
+    "aurc": 0.6539998470427849,
+    "accuracy_at_80pct_coverage": 0.29520605550883094,
+    "auroc_vacuity": 0.48073626169956446,
+    "auroc_conflict": 0.6067579464368456,
+    "mean_vacuity": 0.8563968068041697,
+    "mean_conflict": 0.8782551987851188,
+    "temperature": 1.0,
+    "ece_after_vector_scaling": 0.04976539630748302,
+    "ece_after_temperature": 0.043886424679767104
+  },
+  "matched_comparison": {
+    "target_accuracy": 0.27254374158815614,
+    "baseline_coverage": 0.04576043068640646,
+    "evidence_coverage": 0.020188425302826378,
+    "baseline_selective_ece": 0.3062442266816896,
+    "evidence_selective_ece": 0.23556095645141673
+  },
+  "low_evidence_bucket": {
+    "baseline": {
+      "bucket": 9,
+      "score_range": [
+        0.786972462034617,
+        0.8574935389170147
+      ],
+      "count": 149,
+      "accuracy": 0.15436241610738255,
+      "ece": 0.04106881805538808,
+      "mean_confidence": 0.1952232418785861
+    },
+    "evidence": {
+      "bucket": 9,
+      "score_range": [
+        0.8853488970853123,
+        0.9068801581816657
+      ],
+      "count": 149,
+      "accuracy": 0.3221476510067114,
+      "ece": 0.10565834531849935,
+      "mean_confidence": 0.33606674848161094
+    }
+  },
+  "decomposition": {},
+  "val_nll": {
+    "baseline": 2.4814026761409096,
+    "evidence": 2.4734611129660498
+  },
+  "seconds": {
+    "baseline": 16.99321985244751,
+    "evidence": 19.3975989818573
+  },
+  "conclusion": "证据头未显示实质可信度改善：需要检查损失（如 L_inf 形式）或特征质量"
+}

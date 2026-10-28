@@ -1,0 +1,139 @@
+{
+  "script": "exp1.py",
+  "timestamp": "20261028_154434",
+  "seed": 0,
+  "readout": "lastk",
+  "args": {
+    "features": "/data/ldy/ek55_assets/ek55_verb_full.npz",
+    "synthetic": false,
+    "n_classes": 106,
+    "dim": 1024,
+    "n_train": 8000,
+    "n_val": 2000,
+    "n_test": 2000,
+    "epochs": 50,
+    "batch_size": 128,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "lambda_inf": 0.0,
+    "loss": "edl",
+    "label_smoothing": 0.01,
+    "select_by": "nll",
+    "ce_weight": 0.0,
+    "sigma": 1.0,
+    "lambda_dist": 0.0,
+    "n_bins": 15,
+    "readout": "lastk",
+    "last_k": 10,
+    "seed": 0,
+    "out_dir": null
+  },
+  "env": {
+    "timestamp": "2026-10-28 15:44:34",
+    "hostname": "amax",
+    "platform": "Linux-5.4.0-152-generic-x86_64-with-glibc2.28",
+    "python": "3.10.20",
+    "executable": "/data/conda_envs/insight_env/bin/python",
+    "code": {
+      "repo_root": "/data/ldy/ek55-evidence-cl",
+      "is_git_repo": true,
+      "commit": "5aef449",
+      "branch": "main",
+      "dirty": true
+    },
+    "torch": "2.5.1+cu118",
+    "cuda_available": true,
+    "cuda_version": "11.8",
+    "gpu_count": 1,
+    "gpu_names": [
+      "NVIDIA GeForce RTX 3090"
+    ],
+    "gpu_memory_gb": [
+      23.7
+    ],
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "sklearn": "1.7.0"
+  },
+  "data": {
+    "source": "/data/ldy/ek55_assets/ek55_verb_full.npz",
+    "sha1": "24de252697e5",
+    "n_train": 13857,
+    "n_test": 1486,
+    "dim": 1024,
+    "n_classes": 106
+  },
+  "baseline": {
+    "accuracy": 0.24764468371467024,
+    "ece_equal_width": 0.06471639127417372,
+    "ece_adaptive": 0.06607231440139379,
+    "brier": 0.8777766166517846,
+    "nll": 2.7680282255842457,
+    "auroc_confidence": 0.5955972427471417,
+    "auprc_confidence": 0.29633264525972336,
+    "aurc": 0.7125485033410572,
+    "accuracy_at_80pct_coverage": 0.2674516400336417,
+    "temperature": 1.1,
+    "ece_after_vector_scaling": 0.054749372641963806,
+    "ece_after_temperature": 0.04410853419958496
+  },
+  "evidence": {
+    "accuracy": 0.20053835800807537,
+    "ece_equal_width": 0.008842077095738959,
+    "ece_adaptive": 0.02779903857830716,
+    "brier": 0.8974928560851352,
+    "nll": 3.074108486680039,
+    "auroc_confidence": 0.5348789912548302,
+    "auprc_confidence": 0.2418713849425283,
+    "aurc": 0.7693606749563389,
+    "accuracy_at_80pct_coverage": 0.20100925147182505,
+    "auroc_vacuity": 0.42212109913452195,
+    "auroc_conflict": 0.5181936817842858,
+    "mean_vacuity": 0.2956690383269868,
+    "mean_conflict": 0.9176129880109156,
+    "temperature": 0.9,
+    "ece_after_vector_scaling": 0.04198303720077468,
+    "ece_after_temperature": 0.02714702752886128
+  },
+  "matched_comparison": {
+    "target_accuracy": 0.24764468371467024,
+    "baseline_coverage": 0.08681022880215343,
+    "evidence_coverage": 0.020188425302826378,
+    "baseline_selective_ece": 0.3594747213196564,
+    "evidence_selective_ece": 0.13401395092472257
+  },
+  "low_evidence_bucket": {
+    "baseline": {
+      "bucket": 9,
+      "score_range": [
+        0.8186301123712865,
+        0.8680203625504189
+      ],
+      "count": 149,
+      "accuracy": 0.15436241610738255,
+      "ece": 0.011200932347864283,
+      "mean_confidence": 0.1655633484552468
+    },
+    "evidence": {
+      "bucket": 9,
+      "score_range": [
+        0.3103903238245801,
+        0.3402074723152661
+      ],
+      "count": 149,
+      "accuracy": 0.2214765100671141,
+      "ece": 0.02943776572475708,
+      "mean_confidence": 0.19203874434235707
+    }
+  },
+  "decomposition": {},
+  "val_nll": {
+    "baseline": 2.4703508473890494,
+    "evidence": 2.8976784989853965
+  },
+  "seconds": {
+    "baseline": 27.49889612197876,
+    "evidence": 32.12814283370972
+  },
+  "conclusion": "证据头精度掉超过 1 个百分点：先修训练，不解读可信度"
+}
