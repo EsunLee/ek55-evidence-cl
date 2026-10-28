@@ -99,6 +99,7 @@ def parse_args():
                         help="时序读出：mean=用已池化向量（旧行为）；lastk=最后 k 段均值；attention=注意力池化")
     parser.add_argument("--last-k", type=int, default=5, help="lastk 读出的 k")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--export-alpha", type=str, default=None)
     parser.add_argument("--out-dir", type=str, default=None)
     return parser.parse_args()
 
@@ -658,6 +659,11 @@ def main():
     evidence_alpha = predict_evidence(evidence_model, bundle["x_test"], device)
     evidence_probs = dirichlet_mean(evidence_alpha)
     labels = bundle["y_test"]
+
+    if args.export_alpha:
+        np.savez(args.export_alpha, alpha=np.asarray(evidence_alpha, dtype=np.float32),
+                 y_test=np.asarray(labels, dtype=np.int64))
+        print(f'[导出] 证据 α → {args.export_alpha}')
 
     baseline_report = credibility_report(baseline_probs, labels, args.n_bins)
     evidence_report = credibility_report(evidence_probs, labels, args.n_bins, evidence_alpha=evidence_alpha)

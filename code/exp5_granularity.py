@@ -27,7 +27,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp3_decompose import softmax_rows, train_softmax      # 复用线性 softmax 训练
-from metrics import fit_temperature                          # 跨粒度校准
+from metrics import dirichlet_conflict, dirichlet_vacuity, fit_temperature                          # 跨粒度校准
 
 EPS = 1e-12
 
@@ -237,6 +237,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=150)
     parser.add_argument("--uncertainty", default="margin", choices=["margin", "maxprob"],
                         help="fine 头的不确定度：margin=top1-top2（越大越不确定）")
+    parser.add_argument("--evidence", type=str, default=None)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
@@ -374,7 +375,44 @@ def main():
         "verdict": verdict,
         "seed": args.seed,
     }
+
+    # ===== 证据选择器 vs 概率选择器（同一走粗比例，公平对照）=====
+    evidence_result = None
+    if args.evidence:
+        alpha = np.load(args.evidence)["alpha"].astype(np.float64)
+        conflict = np.asarray(dirichlet_conflict(alpha, k=5), dtype=np.float64)
+        vacuity = np.asarray(dirichlet_vacuity(alpha), dtype=np.float64)
+        ratio = group_result["routed_coarse_ratio"]
+        count = int(round(ratio * len(test_y)))
+        fine_ok = group_of_class[fine_probs.argmax(axis=1)] == test_group
+        coarse_ok = coarse_probs.argmax(axis=1) == test_group
+
+        def route_by(score):
+            order = np.argsort(-score)
+            mask = np.zeros(len(test_y), dtype=bool)
+            mask[order[:count]] = True
+            return float(np.where(mask, coarse_ok, fine_ok).mean())
+
+        evidence_result = {
+            "coarse_ratio": float(ratio),
+            "probability_rule": group_result["routed_accuracy"],
+            "conflict_rule": route_by(conflict),
+            "vacuity_rule": route_by(vacuity),
+        }
+        evidence_result["conflict_vs_probability"] = (
+            evidence_result["conflict_rule"] - evidence_result["probability_rule"])
+        print("\n" + "=" * 78)
+        print(f"证据 vs 概率（同一走粗比例 {ratio:.1%}，共 {count} 条）")
+        print("=" * 78)
+        print(f"  ② 概率（组级期望）  {evidence_result['probability_rule']:.4f}")
+        print(f"  ③ 证据 conflict     {evidence_result['conflict_rule']:.4f}"
+              f"（{evidence_result['conflict_vs_probability']:+.4f}）")
+        print(f"  ④ 证据 vacuity      {evidence_result['vacuity_rule']:.4f}")
+        print("  [结论] " + ("证据（conflict）优于概率" if evidence_result["conflict_vs_probability"] > 0.005
+                            else "证据未优于概率"))
+
     if args.out:
+        payload["evidence_selector"] = evidence_result
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
