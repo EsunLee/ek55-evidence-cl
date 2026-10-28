@@ -78,6 +78,8 @@ def parse_args():
                         help="方差项只压前 k 个候选类（0=全部；建议 5–10，避免压平整个分布）")
     parser.add_argument("--soft-label-beta", type=float, default=1.0,
                         help="平滑预测标签 β（1=硬 one-hot；0.7 表示 0.7·onehot + 0.3·预测）")
+    parser.add_argument("--evidence-param", type=str, default="mean", choices=["mean", "alpha"],
+                        help="证据头参数化：mean=均值(线性 logits)+浓度，精度与基线同构（推荐）；alpha=原 α=ReLU(Wf)+u")
     parser.add_argument("--loss", type=str, default="ce_evi",
                         choices=["ce_evi", "edl", "fisher"],
                         help="ce_evi=CE 主导 + 可分离证据项（推荐）；edl/fisher 为旧实现，保留以便复现")
@@ -259,7 +261,7 @@ def pure_fit_loss(alpha, targets, n_classes, sigma=1.0, soft_beta=1.0):
     strength = alpha.sum(dim=1, keepdim=True)
     probs = alpha / strength
     targets_soft = soft_targets(alpha, targets, n_classes, soft_beta)
-    fisher_weight = torch.polygamma(1.0, alpha)          # ψ⁽¹⁾(α_i)
+    fisher_weight = torch.polygamma(1, alpha)          # ψ⁽¹⁾(α_i)
     squared_error = (targets_soft - probs) ** 2
     return (squared_error * fisher_weight).sum(dim=1).div(2.0 * sigma ** 2).mean()
 
@@ -349,6 +351,30 @@ def iterate_batches(x, y, batch_size, device, shuffle, generator=None, extra=Non
         if extra is not None:
             batch = batch + (to_tensor(extra[index], device),)
         yield batch
+
+
+class EvidenceHeadMean(nn.Module):
+    """均值 + 浓度 的解耦参数化：α = α0(x) · p(x)，其中 p = softmax(线性 logits)。
+
+    为什么需要它：原 EvidenceHead 用 α = ReLU(Wf)+u，α 只能非负相加，
+    表达不了任意 logit → 实测即使损失退化成纯 CE 也掉约 6pp（0.2066 vs 0.2665）。
+    这里让均值走与线性基线**完全同构**的 logit 路径，因此
+        log α − log Σα = log p
+    精度由构造与基线一致；浓度 α0 单独学，用来给出 vacuity 与证据项的作用对象。
+    """
+
+    def __init__(self, dim, n_classes):
+        super().__init__()
+        self.logits = nn.Linear(dim, n_classes)          # 与 LinearHead 同构
+        self.concentration = nn.Linear(dim, 1)           # α0 的来源
+
+    def forward(self, features):
+        logits = self.logits(features)
+        probs = torch.softmax(logits, dim=1)
+        # α0 = K · (1 + softplus(g)) → vacuity = K/α0 ≤ 1
+        strength = self.logits.out_features * (1.0 + torch.nn.functional.softplus(self.concentration(features)))
+        alpha = probs * strength
+        return features, alpha
 
 
 class LastKPool(nn.Module):
@@ -604,7 +630,8 @@ def main():
     baseline_model, baseline_val_nll = train_baseline(baseline_model, bundle, args, device)
     baseline_seconds = time.time() - started
 
-    evidence_model = wrap_readout(EvidenceHead(dim=dim, n_classes=args.n_classes), args, dim).to(device)
+    evidence_class = EvidenceHeadMean if args.evidence_param == "mean" else EvidenceHead
+    evidence_model = wrap_readout(evidence_class(dim=dim, n_classes=args.n_classes), args, dim).to(device)
     started = time.time()
     evidence_model, evidence_val_nll = train_evidence(evidence_model, bundle, args, device)
     evidence_seconds = time.time() - started
@@ -709,6 +736,7 @@ def main():
         "timestamp": stamp,
         "seed": args.seed,
         "readout": args.readout,
+        "evidence_param": args.evidence_param,
         "args": vars(args),
         "env": collect_env(),                   # 三种机器（Windows/macOS/AutoDL）都要能追溯
         "data": {
