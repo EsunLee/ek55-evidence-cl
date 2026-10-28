@@ -70,8 +70,17 @@ def parse_args():
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--lambda-inf", type=float, default=0.0,
                         help="L_inf（trigamma 信息平衡）权重；默认 0，先跑纯 EDL 再逐步加")
-    parser.add_argument("--loss", type=str, default="edl", choices=["edl", "fisher"],
-                        help="证据头损失：edl=标准 Bayes risk；fisher=Fisher 加权（DUDE 形式）")
+    parser.add_argument("--lambda-fit", type=float, default=0.1,
+                        help="ce_evi 模式下纯拟合项的权重（λ1）")
+    parser.add_argument("--lambda-var", type=float, default=0.0,
+                        help="ce_evi 模式下方差项的权重（λ2）；0 表示关闭")
+    parser.add_argument("--var-topk", type=int, default=0,
+                        help="方差项只压前 k 个候选类（0=全部；建议 5–10，避免压平整个分布）")
+    parser.add_argument("--soft-label-beta", type=float, default=1.0,
+                        help="平滑预测标签 β（1=硬 one-hot；0.7 表示 0.7·onehot + 0.3·预测）")
+    parser.add_argument("--loss", type=str, default="ce_evi",
+                        choices=["ce_evi", "edl", "fisher"],
+                        help="ce_evi=CE 主导 + 可分离证据项（推荐）；edl/fisher 为旧实现，保留以便复现")
     parser.add_argument("--label-smoothing", type=float, default=0.01,
                         help="标签平滑；DUDE 用 0.7，但在 K=100+ 时会把目标压成近均匀")
     parser.add_argument("--select-by", type=str, default="nll", choices=["nll", "ece", "accuracy"],
@@ -225,6 +234,50 @@ def edl_bayes_risk_loss(alpha, targets, n_classes, label_smoothing=0.01):
     error_term = (smoothed - probs) ** 2
     variance_term = probs * (1.0 - probs) / (strength + 1.0)
     return (error_term + variance_term).sum(dim=1).mean()
+
+
+def soft_targets(alpha, targets, n_classes, beta=1.0):
+    """平滑预测标签：ŷ = β·onehot + (1−β)·p̂（p̂ 取当前预测并 detach）。
+
+    对应 DUDE 的 "smoothed prediction modeling"。β=1 时退化为硬 one-hot。
+    detach 是必须的：否则等价于给自己加一个自洽约束，会退化成常数解。
+    """
+    one_hot = nn.functional.one_hot(targets, num_classes=n_classes).float()
+    if beta >= 1.0:
+        return one_hot
+    with torch.no_grad():
+        predicted = alpha / alpha.sum(dim=1, keepdim=True)
+    return beta * one_hot + (1.0 - beta) * predicted
+
+
+def pure_fit_loss(alpha, targets, n_classes, sigma=1.0, soft_beta=1.0):
+    """① 纯拟合项：Fisher 加权的平方误差，**不含方差项**。
+
+    为什么必须与方差项分开：消融第 1 步（CE + L_fit）与第 2 步（+ L_var）要能独立测量。
+    edl_bayes_risk_loss 把两者焊在一起，所以它不能当"纯拟合项"用。
+    """
+    strength = alpha.sum(dim=1, keepdim=True)
+    probs = alpha / strength
+    targets_soft = soft_targets(alpha, targets, n_classes, soft_beta)
+    fisher_weight = torch.polygamma(1.0, alpha)          # ψ⁽¹⁾(α_i)
+    squared_error = (targets_soft - probs) ** 2
+    return (squared_error * fisher_weight).sum(dim=1).div(2.0 * sigma ** 2).mean()
+
+
+def variance_penalty(alpha, topk=0):
+    """② 纯方差项：Dirichlet 方差 p(1−p)/(α0+1) 的和，**不含拟合项**。
+
+    topk>0 时只压"候选类"（按 α 排序取前 k）——对应 DUDE 的"只在候选上收紧分布"，
+    避免把整个预测分布压平（那正是掉精度的主因）。
+    """
+    strength = alpha.sum(dim=1, keepdim=True)
+    probs = alpha / strength
+    variance = probs * (1.0 - probs) / (strength + 1.0)
+    if topk and topk > 0:
+        index = torch.topk(alpha, k=min(topk, alpha.shape[1]), dim=1).indices
+        mask = torch.zeros_like(alpha).scatter_(1, index, 1.0)
+        variance = variance * mask
+    return variance.sum(dim=1).mean()
 
 
 def fisher_weighted_reconstruction_loss(alpha, targets, n_classes, sigma=0.1, label_smoothing=0.7):
@@ -409,16 +462,30 @@ def train_evidence(model, bundle, args, device):
                 features, targets = batch
             optimizer.zero_grad()
             _, alpha = model(features)
-            # DUDE 的 L_UDR = L_var + L_rec + L_inf；σ 固定时 L_var 对参数为常数，故略去
-            if args.loss == "edl":
+            if args.loss == "ce_evi":
+                # L = L_CE + λ1·L_fit + λ2·L_var + λ3·L_inf —— 四项独立可关
+                # λ1=λ2=λ3=0 时严格退化为纯 CE（可用它验证没有改坏基线）
+                log_probs = torch.log(alpha) - torch.log(alpha.sum(dim=1, keepdim=True))
+                loss = F.nll_loss(log_probs, targets)
+                if args.lambda_fit > 0.0:
+                    loss = loss + args.lambda_fit * pure_fit_loss(
+                        alpha, targets, args.n_classes,
+                        sigma=args.sigma, soft_beta=args.soft_label_beta)
+                if args.lambda_var > 0.0:
+                    loss = loss + args.lambda_var * variance_penalty(alpha, topk=args.var_topk)
+                if args.lambda_inf > 0.0:
+                    loss = loss + args.lambda_inf * fisher_information_balance_loss(alpha)
+            # 旧实现：EDL Bayes risk 替代 CE（会掉精度，仅用于复现历史结果）
+            elif args.loss == "edl":
                 loss_rec = edl_bayes_risk_loss(alpha, targets, args.n_classes,
                                                label_smoothing=args.label_smoothing)
             else:
                 loss_rec = fisher_weighted_reconstruction_loss(alpha, targets, args.n_classes,
                                                                sigma=args.sigma,
                                                                label_smoothing=args.label_smoothing)
-            loss_inf = fisher_information_balance_loss(alpha)
-            loss = loss_rec + args.lambda_inf * loss_inf
+            if args.loss != "ce_evi":
+                loss_inf = fisher_information_balance_loss(alpha)
+                loss = loss_rec + args.lambda_inf * loss_inf
             if args.ce_weight > 0.0:
                 # 用 Dirichlet 均值算 CE：log p = log α − log Σα
                 log_probs = torch.log(alpha) - torch.log(alpha.sum(dim=1, keepdim=True))
