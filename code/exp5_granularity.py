@@ -27,6 +27,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp3_decompose import softmax_rows, train_softmax      # 复用线性 softmax 训练
+from metrics import fit_temperature                          # 跨粒度校准
 
 EPS = 1e-12
 
@@ -205,6 +206,16 @@ def main():
                                                 epochs=args.epochs, seed=args.seed + 1)
     coarse_probs = softmax_rows(test_x @ coarse_weights + coarse_bias)
 
+    # ⚠️ 跨粒度校准：类数少的头天然更自信（6 类 vs 24 类的最大概率不可比），
+    # 不校准的话 p_coarse > p_fine 会退化成"永远走粗"（自检时 α_eff=0.957）。
+    val_fine_z = val_x @ fine_weights + fine_bias
+    val_coarse_z = val_x @ coarse_weights + coarse_bias
+    temperature_fine, _ = fit_temperature(val_fine_z, val_y)
+    temperature_coarse, _ = fit_temperature(val_coarse_z, group_of_class[val_y])
+    fine_probs = softmax_rows((test_x @ fine_weights + fine_bias) / temperature_fine)
+    coarse_probs = softmax_rows((test_x @ coarse_weights + coarse_bias) / temperature_coarse)
+    print(f"[校准] 温度：fine {temperature_fine:.3f} / coarse {temperature_coarse:.3f}")
+
     if args.uncertainty == "margin":
         top2 = np.sort(fine_probs, axis=1)[:, -2:]
         uncertainty = top2[:, 0] - top2[:, 1]        # 负的间隔：越大越不确定
@@ -255,6 +266,8 @@ def main():
 
     payload = {
         "features": os.path.abspath(args.features),
+        "temperature_fine": float(temperature_fine),
+        "temperature_coarse": float(temperature_coarse),
         "confidence_rule": confidence_result,
         "readout": readout,
         "groups": args.groups,
