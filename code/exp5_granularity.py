@@ -396,18 +396,22 @@ def main():
         evidence_result = {
             "coarse_ratio": float(ratio),
             "probability_rule": group_result["routed_accuracy"],
-            "conflict_rule": route_by(conflict),
-            "vacuity_rule": route_by(vacuity),
+            "conflict_high_to_coarse": route_by(conflict),
+            "conflict_low_to_coarse": route_by(-conflict),
+            "vacuity_high_to_coarse": route_by(vacuity),
+            "vacuity_low_to_coarse": route_by(-vacuity),
         }
         evidence_result["conflict_vs_probability"] = (
-            evidence_result["conflict_rule"] - evidence_result["probability_rule"])
+            evidence_result["conflict_low_to_coarse"] - evidence_result["probability_rule"])
         print("\n" + "=" * 78)
         print(f"证据 vs 概率（同一走粗比例 {ratio:.1%}，共 {count} 条）")
         print("=" * 78)
         print(f"  ② 概率（组级期望）  {evidence_result['probability_rule']:.4f}")
-        print(f"  ③ 证据 conflict     {evidence_result['conflict_rule']:.4f}"
-              f"（{evidence_result['conflict_vs_probability']:+.4f}）")
-        print(f"  ④ 证据 vacuity      {evidence_result['vacuity_rule']:.4f}")
+        print(f"  ③a conflict 高→走粗  {evidence_result['conflict_high_to_coarse']:.4f}")
+        print(f"  ③b conflict 低→走粗  {evidence_result['conflict_low_to_coarse']:.4f}"
+              f"（相对概率 {evidence_result['conflict_vs_probability']:+.4f}）")
+        print(f"  ④a vacuity 高→走粗   {evidence_result['vacuity_high_to_coarse']:.4f}")
+        print(f"  ④b vacuity 低→走粗   {evidence_result['vacuity_low_to_coarse']:.4f}")
         print("  [结论] " + ("证据（conflict）优于概率" if evidence_result["conflict_vs_probability"] > 0.005
                             else "证据未优于概率"))
 
