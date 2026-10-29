@@ -85,6 +85,10 @@ def select_by_trigger(trigger, budget, scores, rng, oracle_benefit=None):
         mask[np.argsort(-scores["conflict"])[:count]] = True
     elif trigger == "confidence":                    # 基线：置信度低 → 该求助
         mask[np.argsort(scores["maxprob"])[:count]] = True
+    elif trigger == "expected_rarity":            # 部署可用：模型自己说"我要答的类多罕见"
+        mask[np.argsort(-scores["expected_rarity"])[:count]] = True
+    elif trigger == "rarity_oracle":              # 上界参照：真实类有多罕见（用到标签）
+        mask[np.argsort(-scores["true_rarity"])[:count]] = True
     elif trigger == "oracle":                        # 上界：只挑"LLM 真能救"的样本
         if oracle_benefit is None:
             raise ValueError("oracle 触发需要 oracle_benefit")
@@ -136,7 +140,8 @@ def main():
     parser = argparse.ArgumentParser(description="LLM 模块骨架：前后证据变化")
     parser.add_argument("--alpha", required=True, help="exp1 --export-alpha 的 npz")
     parser.add_argument("--trigger", default="vacuity",
-                        choices=["vacuity", "conflict", "confidence", "random", "oracle"])
+                        choices=["vacuity", "conflict", "confidence", "random", "oracle",
+                                 "expected_rarity", "rarity_oracle"])
     parser.add_argument("--budget", type=float, default=0.2)
     parser.add_argument("--stub-accuracy", type=float, default=0.7, help="模拟 LLM 的命中率")
     parser.add_argument("--stub-temperature", type=float, default=3.0, help="模拟 LLM 的置信程度")
@@ -170,20 +175,35 @@ def main():
               f"（稀有 {args.rare_frac:.0%} 的类更高）")
 
     before = metrics_of(alpha0, labels)
+
+    # 稀有度：rank 越大 = 越常见；rarity_c = 1 - rank（越罕见越高）
+    if args.features:
+        train_labels = np.load(args.features, allow_pickle=True)["y_train"]
+        counts_all = np.bincount(train_labels, minlength=n_classes).astype(np.float64)
+        order_all = np.argsort(counts_all)
+        rank_all = np.empty(n_classes, dtype=np.float64)
+        rank_all[order_all] = np.linspace(0.0, 1.0, n_classes)
+        rarity_class = 1.0 - rank_all                       # 越罕见越接近 1
+        probs_now = before["probs"]
+        scores["expected_rarity"] = probs_now @ rarity_class  # E[rarity]：只用概率+类频，不用标签
+        scores["true_rarity"] = rarity_class[labels]          # 上界参照
+    else:
+        if args.trigger in ("expected_rarity", "rarity_oracle"):
+            raise SystemExit("[错误] 这两个触发需要 --features（统计类频）")
     scores = {"vacuity": dirichlet_vacuity(alpha0), "conflict": dirichlet_conflict(alpha0, k=5),
               "maxprob": before["probs"].max(axis=1)}
 
     # 先算"LLM 真能救"的 oracle 收益：用 stub 的命中情况估计（真 LLM 时改用实测）
-    support_probe = simulate_llm(labels, n_classes, args.stub_accuracy, args.stub_temperature,
-                                 np.random.default_rng(args.seed + 1), skill=skill)
-    alpha_probe, _ = inject_prior(alpha0, support_probe, np.ones(len(labels), bool),
-                                  args.prior_mode, args.strength)
-    fixed = (alpha0 / alpha0.sum(axis=1, keepdims=True)).argmax(axis=1) != labels
-    helped = (alpha_probe / alpha_probe.sum(axis=1, keepdims=True)).argmax(axis=1) == labels
-    oracle_benefit = (fixed & helped).astype(np.float64)
+    # ⚠️ oracle 必须用**与正式运行同一次**的 stub 抽样（原来用"探针"另抽一次，
+    # 导致 oracle 反而低于 confidence，属于实现 bug）
+    support = simulate_llm(labels, n_classes, args.stub_accuracy, args.stub_temperature, rng, skill=skill)
+    pred_before = (alpha0 / alpha0.sum(axis=1, keepdims=True)).argmax(axis=1)
+    alpha_all, _ = inject_prior(alpha0, support, np.ones(len(labels), bool),
+                                args.prior_mode, args.strength)
+    pred_all = (alpha_all / alpha_all.sum(axis=1, keepdims=True)).argmax(axis=1)
+    oracle_benefit = ((pred_before != labels) & (pred_all == labels)).astype(np.float64)
 
     mask = select_by_trigger(args.trigger, args.budget, scores, rng, oracle_benefit)
-    support = simulate_llm(labels, n_classes, args.stub_accuracy, args.stub_temperature, rng, skill=skill)
     alpha1, delta = inject_prior(alpha0, support, mask, args.prior_mode, args.strength)
     after = metrics_of(alpha1, labels)
 
