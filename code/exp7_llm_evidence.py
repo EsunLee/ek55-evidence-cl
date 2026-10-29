@@ -92,6 +92,9 @@ def collect_llm_supports(args, mask, n_classes):
     indices = np.flatnonzero(mask)
     if args.llm_limit > 0:
         indices = indices[:args.llm_limit]
+    queried = np.zeros(len(mask), dtype=bool)
+    queried[indices] = True
+    args._queried = queried                      # 供后续诊断只统计真正查询过的样本
     print(f"[LLM] 将调用 {len(indices)} 条（缓存目录 {args.llm_cache}）", flush=True)
     import time as _time
     started = _time.time()
@@ -436,15 +439,16 @@ def main():
     # 这是"证据作为度量"能否成立的核心检验——若 confidence 高的样本并没有更常被修对，
     # 那么用 LLM 的置信去驱动 vacuity 注入就是无依据的。
     if args.llm_mode == "real" and llm_confidence is not None:
+        queried_mask = getattr(args, "_queried", mask)     # 只统计真正调用过 LLM 的样本
         pred_after_now = after["probs"].argmax(axis=1)
-        helped = mask & (pred_before != labels) & (pred_after_now == labels)
-        hurt = mask & (pred_before == labels) & (pred_after_now != labels)
-        called = int(mask.sum())
+        helped = queried_mask & (pred_before != labels) & (pred_after_now == labels)
+        hurt = queried_mask & (pred_before == labels) & (pred_after_now != labels)
+        called = int(queried_mask.sum())
         if called > 5:
-            correlation = float(np.corrcoef(llm_confidence[mask], helped[mask].astype(np.float64))[0, 1])
+            correlation = float(np.corrcoef(llm_confidence[queried_mask], helped[queried_mask].astype(np.float64))[0, 1])
             mean_help = float(llm_confidence[helped].mean()) if helped.any() else float("nan")
             mean_hurt = float(llm_confidence[hurt].mean()) if hurt.any() else float("nan")
-            mean_all = float(llm_confidence[mask].mean())
+            mean_all = float(llm_confidence[queried_mask].mean())
             print("\n  [诊断·LLM 置信] 调用 %d 条｜自评置信均值 %.3f" % (called, mean_all))
             print(f"         帮上 {int(helped.sum())} 条（均值 %.3f）｜帮倒忙 {int(hurt.sum())} 条（均值 %.3f）"
                   % (mean_help, mean_hurt))

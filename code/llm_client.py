@@ -57,13 +57,13 @@ def write_cache(cache_dir, key, payload):
 
 
 def call_api(prompt, model, temperature, api_base, api_key, timeout=30, retries=2,
-             max_tokens=200, transport=None):
+             max_tokens=800, transport=None):
     """调用 /chat/completions。transport 可注入（自检时替换成假函数）。"""
     url = api_base.rstrip("/") + "/chat/completions"
     body = json.dumps({
         "model": model,
         "temperature": temperature,
-        "max_tokens": max_tokens,          # ← 关键：禁止模型写长解释（实测不加会慢 10 倍）
+        "max_tokens": max_tokens,          # 推理型模型会把预算花在思考上，太小会导致空回复
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
     headers = {"Content-Type": "application/json"}
@@ -94,7 +94,7 @@ def extract_text(payload):
 
 
 def ask(prompt, model=None, temperature=0.0, api_base=None, api_key=None,
-        cache_dir=None, offline=False, transport=None, max_tokens=200):
+        cache_dir=None, offline=False, transport=None, max_tokens=800):
     """带缓存的一次问答。offline=True 时返回固定桩（用于打通流程，不花钱）。"""
     model = model or os.environ.get("LLM_MODEL", DEFAULT_MODEL)
     api_base = api_base or os.environ.get("LLM_API_BASE", DEFAULT_BASE)
@@ -112,8 +112,16 @@ def ask(prompt, model=None, temperature=0.0, api_base=None, api_key=None,
     payload = call_api(prompt, model, temperature, api_base, api_key,
                        max_tokens=max_tokens, transport=transport)
     text = extract_text(payload)
+    finish = ""
+    choices = payload.get("choices") or []
+    if choices:
+        finish = choices[0].get("finish_reason") or ""
+    if not text.strip():
+        # ⚠️ 空回复**不写缓存**：否则重跑会命中空缓存，永远得不到答案
+        raise RuntimeError(f"LLM 返回空内容（finish_reason={finish or '?'}）；"
+                           f"推理型模型常见于 max_tokens 太小，已跳过缓存以便重试")
     write_cache(cache_dir, key, {"text": text, "model": model, "temperature": temperature,
-                                 "usage": payload.get("usage")})
+                                 "finish_reason": finish, "usage": payload.get("usage")})
     return text
 
 
