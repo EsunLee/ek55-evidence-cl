@@ -108,33 +108,6 @@ def ridge_fit(features, target, l2=1.0):
     return np.linalg.solve(gram, features.T @ target)
 
 
-def build_learned_rarity_scores(train_features, train_labels, test_features,
-                               rarity_class, last_k=5):
-    """从**特征**预测稀有度（可部署：不用测试标签，也不依赖模型自己的概率）。
-
-    为什么必须用特征而不是 E[rarity|p]：模型从不预测稀有类，所以按自己的概率
-    加权只能得到"常见"，存在确认偏误（实测 expected_rarity 仅 +0.54pp）。
-    """
-    def readout(sequence):
-        if sequence is not None and sequence.ndim == 3:
-            k = min(last_k, sequence.shape[1])
-            return sequence[:, sequence.shape[1] - k:, :].mean(axis=1)
-        return None
-
-    train_x = readout(train_features.get("x_seq_train")) if isinstance(train_features, dict) else None
-    test_x = readout(test_features.get("x_seq_test")) if isinstance(test_features, dict) else None
-    if train_x is None:
-        train_x = train_features["x_train"] if isinstance(train_features, dict) else train_features
-        test_x = test_features["x_test"] if isinstance(test_features, dict) else test_features
-
-    mean = train_x.mean(axis=0, keepdims=True)
-    std = train_x.std(axis=0, keepdims=True) + 1e-6
-    train_x = (train_x - mean) / std
-    test_x = (test_x - mean) / std
-    weights = ridge_fit(train_x, rarity_class[train_labels])
-    return test_x @ weights
-
-
 def learned_trigger_scores(features, benefit, folds=5, seed=0):
     """交叉拟合：只在**其他折**的实测收益上训练，避免用自己这折的标签（防泄漏）。"""
     n_samples = len(benefit)
@@ -281,9 +254,24 @@ def main():
         scores["expected_rarity"] = (probs_now * rarity_class[None, :]).sum(axis=1)  # E[rarity]：只用概率+类频，不用标签
         scores["true_rarity"] = rarity_class[labels]          # 上界参照
         # 可部署版：只用**训练集**标签训练"稀有度预测器"，在测试集上打分
+        # 可部署版：只用**训练集**标签训练"稀有度预测器"，在测试集上打分
+        # （NpzFile 不是 dict，必须按 .files 判断字段）
         feats = np.load(args.features, allow_pickle=True)
-        scores["learned_rarity"] = build_learned_rarity_scores(feats, feats["y_train"], feats,
-                                                               rarity_class, last_k=5)
+
+        def readout(container, split, last_k=5):
+            key = f"x_seq_{split}"
+            if key in container.files:
+                sequence = container[key]
+                k = min(last_k, sequence.shape[1])
+                return sequence[:, sequence.shape[1] - k:, :].mean(axis=1)
+            return container[f"x_{split}"]
+
+        train_x = readout(feats, "train")
+        test_x = readout(feats, "test")
+        mean_x = train_x.mean(axis=0, keepdims=True)
+        std_x = train_x.std(axis=0, keepdims=True) + 1e-6
+        weights_rarity = ridge_fit((train_x - mean_x) / std_x, rarity_class[feats["y_train"]])
+        scores["learned_rarity"] = ((test_x - mean_x) / std_x) @ weights_rarity
     else:
         if args.trigger in ("expected_rarity", "rarity_oracle"):
             raise SystemExit("[错误] 这两个触发需要 --features（统计类频）")
