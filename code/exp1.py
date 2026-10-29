@@ -661,7 +661,10 @@ def main():
     labels = bundle["y_test"]
 
     if args.export_alpha:
-        np.savez(args.export_alpha, alpha=np.asarray(evidence_alpha, dtype=np.float32),
+        np.savez(args.export_alpha,
+                 alpha=np.asarray(evidence_alpha, dtype=np.float32),
+                 probs=np.asarray(baseline_probs, dtype=np.float32),
+                 evidence_probs=np.asarray(evidence_probs, dtype=np.float32),
                  y_test=np.asarray(labels, dtype=np.int64))
         print(f'[导出] 证据 α → {args.export_alpha}')
 
