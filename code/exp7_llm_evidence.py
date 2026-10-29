@@ -153,11 +153,15 @@ def inject_prior(alpha, support, mask, mode, strength):
     # 而固定量级 ~1 的先验会被完全淹没（Δ 全为 0，自检踩过）。
     # 这样 strength 的语义才清晰：注入量占总证据的比例。
     total = alpha.sum(axis=1, keepdims=True)
+    strength_vector = np.asarray(strength, dtype=np.float64)
+    if strength_vector.ndim == 0:
+        strength_vector = np.full(len(alpha), float(strength_vector))
+    strength_column = strength_vector[:, None]          # 支持逐样本强度（自适应修正力度）
     if mode == "redistribute":
         centered = support - support.mean(axis=1, keepdims=True)
-        delta = strength * total * centered
+        delta = strength_column * total * centered
     elif mode == "additive":
-        delta = strength * total * support
+        delta = strength_column * total * support
     else:
         raise ValueError(mode)
     delta = delta * mask[:, None]                    # 只对调用样本生效
@@ -197,6 +201,9 @@ def main():
     parser.add_argument("--rare-frac", type=float, default=0.3, help="把最稀有的这一比例类视为'稀有'")
     parser.add_argument("--prior-mode", default="redistribute", choices=["redistribute", "additive"])
     parser.add_argument("--strength", type=float, default=1.0)
+    parser.add_argument("--strength-mode", default="fixed",
+                        choices=["fixed", "adaptive-maxprob", "adaptive-vacuity"],
+                        help="修正力度：fixed=统一；adaptive-* = 按该样本的置信/证据调节（均值对齐）")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
@@ -263,7 +270,17 @@ def main():
     scores["learned"] = learned_trigger_scores(feature_matrix, oracle_benefit, seed=args.seed)
 
     mask = select_by_trigger(args.trigger, args.budget, scores, rng, oracle_benefit)
-    alpha1, delta = inject_prior(alpha0, support, mask, args.prior_mode, args.strength)
+    # 逐样本修正力度（均值对齐，保证与 fixed 的"总预算"可比）
+    if args.strength_mode == "fixed":
+        strength_vector = np.full(len(labels), args.strength)
+    elif args.strength_mode == "adaptive-maxprob":
+        weight = 1.0 - scores["maxprob"]                 # 越不自信 → 修得越狠
+        strength_vector = args.strength * weight / max(weight.mean(), EPS)
+    else:                                                # adaptive-vacuity
+        weight = scores["vacuity"]                       # 越空虚 → 修得越狠
+        strength_vector = args.strength * weight / max(weight.mean(), EPS)
+    strength_vector = strength_vector * mask             # 未调用样本强度为 0
+    alpha1, delta = inject_prior(alpha0, support, mask, args.prior_mode, strength_vector)
     after = metrics_of(alpha1, labels)
 
     print("=" * 78)
