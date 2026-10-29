@@ -101,6 +101,40 @@ def fit_logistic(features, labels, steps=400, lr=0.2, l2=1e-3):
     return weights, bias
 
 
+def ridge_fit(features, target, l2=1.0):
+    """闭式岭回归：w = (XᵀX + λI)⁻¹ Xᵀy。用于从特征预测"这条样本有多稀有"。"""
+    n_samples, n_features = features.shape
+    gram = features.T @ features + l2 * np.eye(n_features)
+    return np.linalg.solve(gram, features.T @ target)
+
+
+def build_learned_rarity_scores(train_features, train_labels, test_features,
+                               rarity_class, last_k=5):
+    """从**特征**预测稀有度（可部署：不用测试标签，也不依赖模型自己的概率）。
+
+    为什么必须用特征而不是 E[rarity|p]：模型从不预测稀有类，所以按自己的概率
+    加权只能得到"常见"，存在确认偏误（实测 expected_rarity 仅 +0.54pp）。
+    """
+    def readout(sequence):
+        if sequence is not None and sequence.ndim == 3:
+            k = min(last_k, sequence.shape[1])
+            return sequence[:, sequence.shape[1] - k:, :].mean(axis=1)
+        return None
+
+    train_x = readout(train_features.get("x_seq_train")) if isinstance(train_features, dict) else None
+    test_x = readout(test_features.get("x_seq_test")) if isinstance(test_features, dict) else None
+    if train_x is None:
+        train_x = train_features["x_train"] if isinstance(train_features, dict) else train_features
+        test_x = test_features["x_test"] if isinstance(test_features, dict) else test_features
+
+    mean = train_x.mean(axis=0, keepdims=True)
+    std = train_x.std(axis=0, keepdims=True) + 1e-6
+    train_x = (train_x - mean) / std
+    test_x = (test_x - mean) / std
+    weights = ridge_fit(train_x, rarity_class[train_labels])
+    return test_x @ weights
+
+
 def learned_trigger_scores(features, benefit, folds=5, seed=0):
     """交叉拟合：只在**其他折**的实测收益上训练，避免用自己这折的标签（防泄漏）。"""
     n_samples = len(benefit)
@@ -131,6 +165,8 @@ def select_by_trigger(trigger, budget, scores, rng, oracle_benefit=None):
         mask[np.argsort(-scores["conflict"])[:count]] = True
     elif trigger == "confidence":                    # 基线：置信度低 → 该求助
         mask[np.argsort(scores["maxprob"])[:count]] = True
+    elif trigger == "learned_rarity":             # 特征预测的稀有度（可部署）
+        mask[np.argsort(-scores["learned_rarity"])[:count]] = True
     elif trigger == "learned":                    # 学出来的触发器（交叉拟合，防泄漏）
         mask[np.argsort(-scores["learned"])[:count]] = True
     elif trigger == "expected_rarity":            # 部署可用：模型自己说"我要答的类多罕见"
@@ -193,7 +229,7 @@ def main():
     parser.add_argument("--alpha", required=True, help="exp1 --export-alpha 的 npz")
     parser.add_argument("--trigger", default="vacuity",
                         choices=["vacuity", "conflict", "confidence", "random", "oracle",
-                                 "expected_rarity", "rarity_oracle", "learned"])
+                                 "expected_rarity", "rarity_oracle", "learned", "learned_rarity"])
     parser.add_argument("--budget", type=float, default=0.2)
     parser.add_argument("--stub-accuracy", type=float, default=0.7, help="模拟 LLM 的命中率")
     parser.add_argument("--stub-temperature", type=float, default=3.0, help="模拟 LLM 的置信程度")
@@ -244,6 +280,10 @@ def main():
         probs_now = before["probs"]
         scores["expected_rarity"] = (probs_now * rarity_class[None, :]).sum(axis=1)  # E[rarity]：只用概率+类频，不用标签
         scores["true_rarity"] = rarity_class[labels]          # 上界参照
+        # 可部署版：只用**训练集**标签训练"稀有度预测器"，在测试集上打分
+        feats = np.load(args.features, allow_pickle=True)
+        scores["learned_rarity"] = build_learned_rarity_scores(feats, feats["y_train"], feats,
+                                                               rarity_class, last_k=5)
     else:
         if args.trigger in ("expected_rarity", "rarity_oracle"):
             raise SystemExit("[错误] 这两个触发需要 --features（统计类频）")
