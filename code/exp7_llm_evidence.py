@@ -199,7 +199,9 @@ def metrics_of(alpha, labels):
 
 def main():
     parser = argparse.ArgumentParser(description="LLM 模块骨架：前后证据变化")
-    parser.add_argument("--alpha", required=True, help="exp1 --export-alpha 的 npz")
+    parser.add_argument("--preset", default=None, choices=["verb", "group"],
+                        help="快捷预设：verb=EK55 动词级；group=25 组（自动填 --alpha/--features）")
+    parser.add_argument("--alpha", default=None, help="exp1 --export-alpha 的 npz")
     parser.add_argument("--trigger", default="vacuity",
                         choices=["vacuity", "conflict", "confidence", "random", "oracle",
                                  "expected_rarity", "rarity_oracle", "learned", "learned_rarity"])
@@ -223,6 +225,19 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
+
+    presets = {
+        "verb": {"alpha": "/data/ldy/ek55_assets/alpha_verb.npz",
+                 "features": "/data/ldy/ek55_assets/ek55_verb_full.npz"},
+        "group": {"alpha": "/data/ldy/ek55_assets/alpha_group25.npz",
+                  "features": "/data/ldy/ek55_assets/ek55_group25.npz"},
+    }
+    if args.preset:
+        for key, value in presets[args.preset].items():
+            if getattr(args, key) is None:
+                setattr(args, key, value)
+    if not args.alpha:
+        raise SystemExit("[错误] 需要 --alpha，或用 --preset verb / --preset group")
 
     data = np.load(args.alpha, allow_pickle=True)
     alpha0 = data["alpha"].astype(np.float64)
