@@ -71,27 +71,33 @@ def build_skill_profile(train_labels, n_classes, rare_prob=0.9, common_prob=0.3,
 
 
 def fit_logistic(features, labels, steps=400, lr=0.2, l2=1e-3):
-    """小逻辑回归（numpy + Adam）。输入已标准化。"""
+    """小逻辑回归（numpy + Adam）。输入已标准化。
+
+    注意：全部用逐元素求和而非 matmul（BLAS 在本数据上会报浮点告警），
+    且 bias 用显式局部变量更新（早先版本对 float 用 -= 只是重新绑定，bias 从未被训练）。
+    """
     n_samples, n_features = features.shape
     weights = np.zeros(n_features)
     bias = 0.0
-    m_w, v_w, m_b, v_b = np.zeros(n_features), np.zeros(n_features), 0.0, 0.0
+    m_w, v_w = np.zeros(n_features), np.zeros(n_features)
+    m_b = v_b = 0.0
     beta1, beta2 = 0.9, 0.999
     for step in range(1, steps + 1):
-        logits = (features * weights[None, :]).sum(axis=1) + bias   # 用求和替代 matmul
+        logits = (features * weights[None, :]).sum(axis=1) + bias
         probs = 1.0 / (1.0 + np.exp(-np.clip(logits, -30, 30)))
-        grad = (probs - labels) / n_samples
-        grad_w = features.T @ grad + l2 * weights
-        grad_b = grad.sum()
-        for parameter, gradient, m, v in ((weights, grad_w, m_w, v_w), (bias, grad_b, m_b, v_b)):
-            m *= beta1
-            m += (1 - beta1) * gradient
-            v *= beta2
-            v += (1 - beta2) * gradient * gradient
-            m_hat = m / (1 - beta1 ** step)
-            v_hat = v / (1 - beta2 ** step)
-            parameter -= lr * m_hat / (np.sqrt(v_hat) + 1e-8)
-            parameter[:] = np.clip(np.nan_to_num(parameter), -50.0, 50.0)
+        residual = (probs - labels) / n_samples
+        grad_w = (features * residual[:, None]).sum(axis=0) + l2 * weights
+        grad_b = float(residual.sum())
+
+        m_w = beta1 * m_w + (1 - beta1) * grad_w
+        v_w = beta2 * v_w + (1 - beta2) * grad_w * grad_w
+        step_w = lr * (m_w / (1 - beta1 ** step)) / (np.sqrt(v_w / (1 - beta2 ** step)) + 1e-8)
+        weights = np.clip(np.nan_to_num(weights - step_w), -50.0, 50.0)
+
+        m_b = beta1 * m_b + (1 - beta1) * grad_b
+        v_b = beta2 * v_b + (1 - beta2) * grad_b * grad_b
+        step_b = lr * (m_b / (1 - beta1 ** step)) / (np.sqrt(v_b / (1 - beta2 ** step)) + 1e-8)
+        bias = float(np.clip(np.nan_to_num(bias - step_b), -50.0, 50.0))
     return weights, bias
 
 
