@@ -23,8 +23,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from exp7_llm_evidence import (build_skill_profile, inject_prior, metrics_of,
-                               select_by_trigger, simulate_llm)
+from exp7_llm_evidence import (build_skill_profile, inject_prior, learned_trigger_scores,
+                               metrics_of, select_by_trigger, simulate_llm)
 from metrics import dirichlet_conflict, dirichlet_vacuity
 
 EPS = 1e-12
@@ -72,6 +72,27 @@ def main():
         "maxprob": before["probs"].max(axis=1),
     }
 
+    # 稀有度分数（供 expected_rarity / rarity_oracle 触发使用）
+    counts_all = np.bincount(train_labels, minlength=n_classes).astype(np.float64)
+    order_all = np.argsort(counts_all)
+    rank_all = np.empty(n_classes, dtype=np.float64)
+    rank_all[order_all] = np.linspace(0.0, 1.0, n_classes)
+    rarity_class = 1.0 - rank_all
+    scores["expected_rarity"] = before["probs"] @ rarity_class
+    scores["true_rarity"] = rarity_class[labels]
+
+    # 学习式触发器的输入特征（全部可在推理时得到）
+    sorted_probs = np.sort(before["probs"], axis=1)
+    feature_matrix = np.column_stack([
+        sorted_probs[:, -1],
+        sorted_probs[:, -1] - sorted_probs[:, -2],
+        1.0 + (before["probs"] * np.log(np.clip(before["probs"], EPS, None))).sum(axis=1),
+        scores["vacuity"],
+        scores["conflict"],
+        scores["expected_rarity"],
+    ])
+    feature_matrix = (feature_matrix - feature_matrix.mean(axis=0)) / (feature_matrix.std(axis=0) + 1e-8)
+
     strengths = [float(item) for item in args.strengths.split(",")]
     triggers = [item.strip() for item in args.triggers.split(",")]
 
@@ -81,6 +102,10 @@ def main():
         alpha_all, _ = inject_prior(alpha0, support, np.ones(n_samples, bool), args.prior_mode, strength)
         pred_all = (alpha_all / alpha_all.sum(axis=1, keepdims=True)).argmax(axis=1)
         oracle_benefit = ((pred_before != labels) & (pred_all == labels)).astype(np.float64)
+
+        # learned 的标签依赖强度 → 每个强度单独交叉拟合
+        if "learned" in triggers:
+            scores["learned"] = learned_trigger_scores(feature_matrix, oracle_benefit, seed=args.seed)
 
         row = {}
         for trigger in triggers:
