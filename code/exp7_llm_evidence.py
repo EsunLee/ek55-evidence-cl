@@ -108,6 +108,27 @@ def ridge_fit(features, target, l2=1.0):
     return np.linalg.solve(gram, features.T @ target)
 
 
+def prototype_distance_rarity(train_x, train_labels, test_x, n_classes, top_k=3):
+    """原型距离：到最近类原型的距离越大 → 越可能是没见过的稀有类（经典 OOD 信号）。
+
+    比线性岭回归更贴合"稀有 = 偏离"的结构：线性模型只能沿全局方向加权，
+    而原型距离是**逐类的局部**判据。
+    """
+    prototypes = np.zeros((n_classes, train_x.shape[1]), dtype=np.float64)
+    for class_id in range(n_classes):
+        members = train_x[train_labels == class_id]
+        if len(members) > 0:
+            prototypes[class_id] = members.mean(axis=0)
+    # 分块算距离，避免 (N_test, K, D) 爆内存
+    scores = np.empty(len(test_x), dtype=np.float64)
+    chunk = 256
+    for start in range(0, len(test_x), chunk):
+        block = test_x[start:start + chunk]
+        distances = ((block[:, None, :] - prototypes[None, :, :]) ** 2).sum(axis=2)
+        scores[start:start + chunk] = np.partition(distances, top_k - 1, axis=1)[:, :top_k].mean(axis=1)
+    return scores
+
+
 def learned_trigger_scores(features, benefit, folds=5, seed=0):
     """交叉拟合：只在**其他折**的实测收益上训练，避免用自己这折的标签（防泄漏）。"""
     n_samples = len(benefit)
@@ -138,6 +159,8 @@ def select_by_trigger(trigger, budget, scores, rng, oracle_benefit=None):
         mask[np.argsort(-scores["conflict"])[:count]] = True
     elif trigger == "confidence":                    # 基线：置信度低 → 该求助
         mask[np.argsort(scores["maxprob"])[:count]] = True
+    elif trigger == "knn_rarity":                 # 原型距离（可部署）
+        mask[np.argsort(-scores["knn_rarity"])[:count]] = True
     elif trigger == "learned_rarity":             # 特征预测的稀有度（可部署）
         mask[np.argsort(-scores["learned_rarity"])[:count]] = True
     elif trigger == "learned":                    # 学出来的触发器（交叉拟合，防泄漏）
@@ -204,7 +227,7 @@ def main():
     parser.add_argument("--alpha", default=None, help="exp1 --export-alpha 的 npz")
     parser.add_argument("--trigger", default="vacuity",
                         choices=["vacuity", "conflict", "confidence", "random", "oracle",
-                                 "expected_rarity", "rarity_oracle", "learned", "learned_rarity"])
+                                 "expected_rarity", "rarity_oracle", "learned", "learned_rarity", "knn_rarity"])
     parser.add_argument("--budget", type=float, default=0.2)
     parser.add_argument("--stub-accuracy", type=float, default=0.7, help="模拟 LLM 的命中率")
     parser.add_argument("--stub-temperature", type=float, default=3.0, help="模拟 LLM 的置信程度")
@@ -292,6 +315,9 @@ def main():
         print("[稀有度] 岭回归求解（1024 维，数秒）…", flush=True)
         weights_rarity = ridge_fit((train_x - mean_x) / std_x, rarity_class[feats["y_train"]])
         scores["learned_rarity"] = ((test_x - mean_x) / std_x) @ weights_rarity
+        print("[稀有度] 原型距离…", flush=True)
+        scores["knn_rarity"] = prototype_distance_rarity(
+            (train_x - mean_x) / std_x, feats["y_train"], (test_x - mean_x) / std_x, n_classes)
         print("[稀有度] 完成", flush=True)
     else:
         if args.trigger in ("expected_rarity", "rarity_oracle"):
