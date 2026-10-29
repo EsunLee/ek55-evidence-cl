@@ -27,6 +27,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from llm_client import ask as llm_ask
+from llm_prompts import build_prompt, load_class_names, parse_response, ranking_to_support
 from metrics import dirichlet_conflict, dirichlet_vacuity, ece_equal_width
 
 EPS = 1e-12
@@ -68,6 +70,39 @@ def build_skill_profile(train_labels, n_classes, rare_prob=0.9, common_prob=0.3,
     ramp = np.clip((rare_frac - rank) / max(rare_frac, EPS), 0.0, 1.0)
     skill = common_prob + (rare_prob - common_prob) * ramp
     return skill, counts
+
+
+def collect_llm_supports(args, mask, n_classes):
+    """对选中的样本调用真 LLM，返回 (support [N,K], confidence [N])。
+
+    只对 mask=True 的样本花钱；其余行留空（后续只用到 mask 行）。
+    """
+    feats = np.load(args.features, allow_pickle=True)
+    meta = json.loads(str(feats["meta"]))
+    class_ids = meta["classes"]
+    verb_names = load_class_names(args.verb_names)
+    noun_names = load_class_names(args.noun_names)
+    candidate_names = [verb_names.get(int(cid), f"verb{cid}") for cid in class_ids]
+
+    past_verb = feats["past_verb_test"]
+    past_noun = feats["past_noun_test"]
+    support = np.zeros((len(mask), n_classes), dtype=np.float64)
+    confidence = np.ones(len(mask), dtype=np.float64)
+
+    indices = np.flatnonzero(mask)
+    if args.llm_limit > 0:
+        indices = indices[:args.llm_limit]
+    print(f"[LLM] 将调用 {len(indices)} 条（缓存目录 {args.llm_cache}）", flush=True)
+    for done, index in enumerate(indices, start=1):
+        prompt = build_prompt(past_verb[index], past_noun[index], candidate_names,
+                              verb_names, noun_names)
+        text = llm_ask(prompt, cache_dir=args.llm_cache)
+        ranking, conf = parse_response(text)
+        support[index] = ranking_to_support(ranking, candidate_names, conf)
+        confidence[index] = 0.7 if conf is None else float(np.clip(conf, 0.05, 1.0))
+        if done % 10 == 0:
+            print(f"[LLM] {done}/{len(indices)}", flush=True)
+    return support, confidence
 
 
 def fit_logistic(features, labels, steps=400, lr=0.2, l2=1e-3):
@@ -240,6 +275,14 @@ def main():
     parser.add_argument("--skill-rare", type=float, default=0.9)
     parser.add_argument("--skill-common", type=float, default=0.3)
     parser.add_argument("--rare-frac", type=float, default=0.3, help="把最稀有的这一比例类视为'稀有'")
+    parser.add_argument("--llm-mode", default="stub", choices=["stub", "real"],
+                        help="stub=模拟器（默认）；real=真调 LLM（需 LLM_API_KEY）")
+    parser.add_argument("--verb-names", default="/data/datasets/EPIC-KITCHENS/annotations/EPIC_verb_classes.csv")
+    parser.add_argument("--noun-names", default="/data/datasets/EPIC-KITCHENS/annotations/EPIC_noun_classes.csv")
+    parser.add_argument("--llm-cache", default="/data/ldy/ek55_assets/llm_cache")
+    parser.add_argument("--llm-limit", type=int, default=0, help="最多调用多少条（0=全部选中的）")
+    parser.add_argument("--llm-confidence-weight", action="store_true",
+                        help="用 LLM 的 confidence 调节注入强度（即'证据增加量 c'这一路）")
     parser.add_argument("--prior-mode", default="redistribute", choices=["redistribute", "additive"])
     parser.add_argument("--strength", type=float, default=1.0)
     parser.add_argument("--strength-mode", default="fixed",
@@ -350,6 +393,13 @@ def main():
     scores["learned"] = learned_trigger_scores(feature_matrix, oracle_benefit, seed=args.seed)
 
     mask = select_by_trigger(args.trigger, args.budget, scores, rng, oracle_benefit)
+
+    llm_confidence = None
+    if args.llm_mode == "real":
+        if "past_verb_test" not in np.load(args.features, allow_pickle=True).files:
+            raise SystemExit("[错误] 需要 --with-text 重建的 npz（含 past_verb_test）")
+        llm_support, llm_confidence = collect_llm_supports(args, mask, n_classes)
+        support = np.where(mask[:, None], llm_support, support)
     # 逐样本修正力度（均值对齐，保证与 fixed 的"总预算"可比）
     if args.strength_mode == "fixed":
         strength_vector = np.full(len(labels), args.strength)
@@ -359,6 +409,8 @@ def main():
     else:                                                # adaptive-vacuity
         weight = scores["vacuity"]                       # 越空虚 → 修得越狠
         strength_vector = args.strength * weight / max(weight.mean(), EPS)
+    if args.llm_mode == "real" and args.llm_confidence_weight and llm_confidence is not None:
+        strength_vector = strength_vector * np.where(mask, llm_confidence, 1.0)
     strength_vector = strength_vector * mask             # 未调用样本强度为 0
     alpha1, delta = inject_prior(alpha0, support, mask, args.prior_mode, strength_vector)
     after = metrics_of(alpha1, labels)
