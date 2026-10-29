@@ -236,6 +236,11 @@ def collect_split(segments, features_dir, past, future, workers, limit=0):
     pairs = np.array([[sample["target"]["verb_class"], sample["target"]["noun_class"]]
                       for sample in all_samples], dtype=np.int64)
     pooled = past_stack.mean(axis=1).astype(np.float32)
+    # 过去窗口的 verb/noun id（int16，约 1 MB）：供 LLM prompt 拼"动作序列"文本
+    past_verb = np.array([[segment["verb_class"] for segment in sample["past"]]
+                          for sample in all_samples], dtype=np.int16)
+    past_noun = np.array([[segment["noun_class"] for segment in sample["past"]]
+                          for sample in all_samples], dtype=np.int16)
     return {
         "x": pooled,
         "x_seq": past_stack,
@@ -243,6 +248,8 @@ def collect_split(segments, features_dir, past, future, workers, limit=0):
         "pairs": pairs,
         "stats": stats_total,
         "uids": [sample["target"]["uid"] for sample in all_samples],
+        "past_verb": past_verb,
+        "past_noun": past_noun,
     }
 
 
@@ -252,6 +259,8 @@ def main():
     parser.add_argument("--features-train", required=True)
     parser.add_argument("--features-val", default=None)
     parser.add_argument("--exclude-manifest", default=None, help="clean_v2_manifest.json（剔除帧不全的视频）")
+    parser.add_argument("--with-text", action="store_true",
+                        help="额外保存 past_verb/past_noun（过去窗口动作 id，供 LLM prompt 用；约 1 MB）")
     parser.add_argument("--out", required=True)
     parser.add_argument("--past", type=int, default=30)
     parser.add_argument("--future", type=int, default=8)
@@ -337,6 +346,9 @@ def main():
         "x_seq_train": train_data["x_seq"],
         "x_future_train": train_data["x_future"],
         "y_train": train_labels,
+        **(({"past_verb_train": train_data["past_verb"],
+              "past_noun_train": train_data["past_noun"],
+              "uids_train": np.array(train_data["uids"])}) if (args.with_text and train_data is not None) else {}),
     }
     if val_data is not None:
         payload.update({
@@ -344,6 +356,9 @@ def main():
             "x_seq_val": val_data["x_seq"],
             "x_future_val": val_data["x_future"],
             "y_val": val_labels,
+        **(({"past_verb_val": val_data["past_verb"],
+              "past_noun_val": val_data["past_noun"],
+              "uids_val": np.array(val_data["uids"])}) if (args.with_text and val_data is not None) else {}),
         })
     if test_data is not None:
         payload.update({
@@ -351,6 +366,9 @@ def main():
             "x_seq_test": test_data["x_seq"],
             "x_future_test": test_data["x_future"],
             "y_test": test_labels,
+        **(({"past_verb_test": test_data["past_verb"],
+              "past_noun_test": test_data["past_noun"],
+              "uids_test": np.array(test_data["uids"])}) if (args.with_text and test_data is not None) else {}),
         })
     meta = {
         "labels": os.path.abspath(args.labels),
