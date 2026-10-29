@@ -206,6 +206,8 @@ def main():
     parser.add_argument("--budget", type=float, default=0.2)
     parser.add_argument("--stub-accuracy", type=float, default=0.7, help="模拟 LLM 的命中率")
     parser.add_argument("--stub-temperature", type=float, default=3.0, help="模拟 LLM 的置信程度")
+    parser.add_argument("--feature-readout", default="pooled", choices=["pooled", "lastk"],
+                        help="稀有度预测器用的特征：pooled=已池化 x_*（快）；lastk=读 x_seq 取末 k 段（慢，850MB）")
     parser.add_argument("--features", type=str, default=None,
                         help="stub-mode=class-frequency 时必需：含 y_train 的 npz（用于统计类频）")
     parser.add_argument("--stub-mode", default="uniform", choices=["uniform", "class-frequency"],
@@ -260,18 +262,22 @@ def main():
 
         def readout(container, split, last_k=5):
             key = f"x_seq_{split}"
-            if key in container.files:
+            if args.feature_readout == "lastk" and key in container.files:
+                print(f"[稀有度] 读取 {key}（较大，约数秒）…", flush=True)
                 sequence = container[key]
                 k = min(last_k, sequence.shape[1])
-                return sequence[:, sequence.shape[1] - k:, :].mean(axis=1)
-            return container[f"x_{split}"]
+                return np.asarray(sequence[:, sequence.shape[1] - k:, :].mean(axis=1), dtype=np.float64)
+            return np.asarray(container[f"x_{split}"], dtype=np.float64)
 
+        print("[稀有度] 构建特征…", flush=True)
         train_x = readout(feats, "train")
         test_x = readout(feats, "test")
         mean_x = train_x.mean(axis=0, keepdims=True)
         std_x = train_x.std(axis=0, keepdims=True) + 1e-6
+        print("[稀有度] 岭回归求解（1024 维，数秒）…", flush=True)
         weights_rarity = ridge_fit((train_x - mean_x) / std_x, rarity_class[feats["y_train"]])
         scores["learned_rarity"] = ((test_x - mean_x) / std_x) @ weights_rarity
+        print("[稀有度] 完成", flush=True)
     else:
         if args.trigger in ("expected_rarity", "rarity_oracle"):
             raise SystemExit("[错误] 这两个触发需要 --features（统计类频）")
