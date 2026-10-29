@@ -78,7 +78,8 @@ def main():
     rank_all = np.empty(n_classes, dtype=np.float64)
     rank_all[order_all] = np.linspace(0.0, 1.0, n_classes)
     rarity_class = 1.0 - rank_all
-    scores["expected_rarity"] = before["probs"] @ rarity_class
+    probs_safe = np.nan_to_num(before["probs"], nan=0.0, posinf=0.0, neginf=0.0)
+    scores["expected_rarity"] = np.nan_to_num(probs_safe @ rarity_class)
     scores["true_rarity"] = rarity_class[labels]
 
     # 学习式触发器的输入特征（全部可在推理时得到）
@@ -91,7 +92,9 @@ def main():
         scores["conflict"],
         scores["expected_rarity"],
     ])
+    feature_matrix = np.nan_to_num(feature_matrix, nan=0.0, posinf=0.0, neginf=0.0)
     feature_matrix = (feature_matrix - feature_matrix.mean(axis=0)) / (feature_matrix.std(axis=0) + 1e-8)
+    feature_matrix = np.clip(np.nan_to_num(feature_matrix), -10.0, 10.0)   # 防数值爆炸
 
     strengths = [float(item) for item in args.strengths.split(",")]
     triggers = [item.strip() for item in args.triggers.split(",")]

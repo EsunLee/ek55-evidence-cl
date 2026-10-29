@@ -90,10 +90,8 @@ def fit_logistic(features, labels, steps=400, lr=0.2, l2=1e-3):
             v += (1 - beta2) * gradient * gradient
             m_hat = m / (1 - beta1 ** step)
             v_hat = v / (1 - beta2 ** step)
-            if np.ndim(parameter) == 0:
-                parameter -= lr * m_hat / (np.sqrt(v_hat) + 1e-8)
-            else:
-                parameter -= lr * m_hat / (np.sqrt(v_hat) + 1e-8)
+            parameter -= lr * m_hat / (np.sqrt(v_hat) + 1e-8)
+            parameter[:] = np.clip(np.nan_to_num(parameter), -50.0, 50.0)
     return weights, bias
 
 
