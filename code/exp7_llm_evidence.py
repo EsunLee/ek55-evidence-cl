@@ -235,7 +235,7 @@ def main():
         rank_all[order_all] = np.linspace(0.0, 1.0, n_classes)
         rarity_class = 1.0 - rank_all                       # 越罕见越接近 1
         probs_now = before["probs"]
-        scores["expected_rarity"] = probs_now @ rarity_class  # E[rarity]：只用概率+类频，不用标签
+        scores["expected_rarity"] = (probs_now * rarity_class[None, :]).sum(axis=1)  # E[rarity]：只用概率+类频，不用标签
         scores["true_rarity"] = rarity_class[labels]          # 上界参照
     else:
         if args.trigger in ("expected_rarity", "rarity_oracle"):

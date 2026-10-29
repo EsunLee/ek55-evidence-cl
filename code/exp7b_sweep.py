@@ -79,7 +79,8 @@ def main():
     rank_all[order_all] = np.linspace(0.0, 1.0, n_classes)
     rarity_class = 1.0 - rank_all
     probs_safe = np.nan_to_num(before["probs"], nan=0.0, posinf=0.0, neginf=0.0)
-    scores["expected_rarity"] = np.nan_to_num(probs_safe @ rarity_class)
+    scores["expected_rarity"] = np.nan_to_num(
+            (probs_safe * rarity_class[None, :]).sum(axis=1))   # 用求和替代 matmul（避免 BLAS 告警）
     scores["true_rarity"] = rarity_class[labels]
 
     # 学习式触发器的输入特征（全部可在推理时得到）
