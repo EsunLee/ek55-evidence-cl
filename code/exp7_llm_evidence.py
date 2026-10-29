@@ -84,12 +84,15 @@ def inject_prior(alpha, support, mask, mode, strength):
     redistribute：u 零均值（Σu=0），总证据 α0 不变 → vacuity 不变，只有 conflict 能动。
     additive    ：u ≥ 0，α0 变大 → vacuity **必然**下降（算术效应，须显式承认）。
     """
-    n_classes = alpha.shape[1]
+    # ⚠️ 必须按 **α₀ 的比例**注入：实测 α₀ ≈ 124（106 类 / vacuity 0.856），
+    # 而固定量级 ~1 的先验会被完全淹没（Δ 全为 0，自检踩过）。
+    # 这样 strength 的语义才清晰：注入量占总证据的比例。
+    total = alpha.sum(axis=1, keepdims=True)
     if mode == "redistribute":
         centered = support - support.mean(axis=1, keepdims=True)
-        delta = strength * centered
+        delta = strength * total * centered
     elif mode == "additive":
-        delta = strength * support * n_classes
+        delta = strength * total * support
     else:
         raise ValueError(mode)
     delta = delta * mask[:, None]                    # 只对调用样本生效
