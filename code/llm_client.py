@@ -47,13 +47,14 @@ def write_cache(cache_dir, key, payload):
         json.dump(payload, handle, ensure_ascii=False)
 
 
-def call_api(prompt, model, temperature, api_base, api_key, timeout=60, retries=3,
-             transport=None):
+def call_api(prompt, model, temperature, api_base, api_key, timeout=30, retries=2,
+             max_tokens=200, transport=None):
     """调用 /chat/completions。transport 可注入（自检时替换成假函数）。"""
     url = api_base.rstrip("/") + "/chat/completions"
     body = json.dumps({
         "model": model,
         "temperature": temperature,
+        "max_tokens": max_tokens,          # ← 关键：禁止模型写长解释（实测不加会慢 10 倍）
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
     headers = {"Content-Type": "application/json"}
@@ -70,7 +71,7 @@ def call_api(prompt, model, temperature, api_base, api_key, timeout=60, retries=
                 return json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as error:
             last_error = error
-            time.sleep(min(2 ** attempt, 8))
+            time.sleep(min(2 ** attempt, 4))
     raise RuntimeError(f"LLM 调用失败（重试 {retries} 次）：{last_error}")
 
 
@@ -84,7 +85,7 @@ def extract_text(payload):
 
 
 def ask(prompt, model=None, temperature=0.0, api_base=None, api_key=None,
-        cache_dir=None, offline=False, transport=None):
+        cache_dir=None, offline=False, transport=None, max_tokens=200):
     """带缓存的一次问答。offline=True 时返回固定桩（用于打通流程，不花钱）。"""
     model = model or os.environ.get("LLM_MODEL", DEFAULT_MODEL)
     api_base = api_base or os.environ.get("LLM_API_BASE", DEFAULT_BASE)
@@ -99,7 +100,8 @@ def ask(prompt, model=None, temperature=0.0, api_base=None, api_key=None,
     if cached is not None:
         return cached["text"]
 
-    payload = call_api(prompt, model, temperature, api_base, api_key, transport=transport)
+    payload = call_api(prompt, model, temperature, api_base, api_key,
+                       max_tokens=max_tokens, transport=transport)
     text = extract_text(payload)
     write_cache(cache_dir, key, {"text": text, "model": model, "temperature": temperature,
                                  "usage": payload.get("usage")})
@@ -107,8 +109,9 @@ def ask(prompt, model=None, temperature=0.0, api_base=None, api_key=None,
 
 
 def self_test():
-    workdir = os.path.join("/tmp", "llm_client_test")
-    os.makedirs(workdir, exist_ok=True)
+    import shutil
+    import tempfile
+    workdir = tempfile.mkdtemp(prefix="llm_client_test_")   # 每次唯一，避免旧缓存干扰自检
     calls = {"n": 0}
 
     def fake_transport(url, headers, body, timeout):
@@ -133,6 +136,7 @@ def self_test():
     assert extract_text({"choices": [{"message": {"content": "x"}}]}) == "x"
     assert extract_text({}) == ""
     assert ask("p", offline=True).find("_offline") > 0
+    shutil.rmtree(workdir, ignore_errors=True)
     print(f"自检通过：缓存命中（1 次调用 / 2 次请求）、离线桩、响应解析；输出示例 {other[:30]}…")
 
 

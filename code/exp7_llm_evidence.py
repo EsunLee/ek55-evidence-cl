@@ -93,15 +93,19 @@ def collect_llm_supports(args, mask, n_classes):
     if args.llm_limit > 0:
         indices = indices[:args.llm_limit]
     print(f"[LLM] 将调用 {len(indices)} 条（缓存目录 {args.llm_cache}）", flush=True)
+    import time as _time
+    started = _time.time()
     for done, index in enumerate(indices, start=1):
         prompt = build_prompt(past_verb[index], past_noun[index], candidate_names,
                               verb_names, noun_names)
+        call_started = _time.time()
         text = llm_ask(prompt, cache_dir=args.llm_cache)
+        elapsed = _time.time() - call_started
         ranking, conf = parse_response(text)
         support[index] = ranking_to_support(ranking, candidate_names, conf)
         confidence[index] = 0.7 if conf is None else float(np.clip(conf, 0.05, 1.0))
-        if done % 10 == 0:
-            print(f"[LLM] {done}/{len(indices)}", flush=True)
+        print(f"[LLM] {done}/{len(indices)} 本条 {elapsed:.1f}s  "
+              f"累计 {_time.time() - started:.0f}s", flush=True)
     return support, confidence
 
 
@@ -326,7 +330,10 @@ def main():
     scores = {"vacuity": dirichlet_vacuity(alpha0), "conflict": dirichlet_conflict(alpha0, k=5),
               "maxprob": before["probs"].max(axis=1)}
     # 稀有度：rank 越大 = 越常见；rarity_c = 1 - rank（越罕见越高）
-    if args.features:
+    # 只在触发/诊断真正需要时才计算（岭回归 1024 维 + 原型距离要 1–2 分钟）
+    needs_rarity = args.trigger in {"expected_rarity", "rarity_oracle",
+                                    "learned_rarity", "knn_rarity"}
+    if args.features and needs_rarity:
         train_labels = np.load(args.features, allow_pickle=True)["y_train"]
         counts_all = np.bincount(train_labels, minlength=n_classes).astype(np.float64)
         order_all = np.argsort(counts_all)
@@ -424,6 +431,25 @@ def main():
     for key in ("accuracy", "ece", "vacuity_mean", "conflict_mean"):
         delta_value = after[key] - before[key]
         print(f"  {key:<12}{before[key]:>10.4f}{after[key]:>10.4f}{delta_value:>+10.4f}")
+
+    # 诊断（真 LLM 模式）：LLM 的自我置信是否对应它实际的帮助？
+    # 这是"证据作为度量"能否成立的核心检验——若 confidence 高的样本并没有更常被修对，
+    # 那么用 LLM 的置信去驱动 vacuity 注入就是无依据的。
+    if args.llm_mode == "real" and llm_confidence is not None:
+        pred_after_now = after["probs"].argmax(axis=1)
+        helped = mask & (pred_before != labels) & (pred_after_now == labels)
+        hurt = mask & (pred_before == labels) & (pred_after_now != labels)
+        called = int(mask.sum())
+        if called > 5:
+            correlation = float(np.corrcoef(llm_confidence[mask], helped[mask].astype(np.float64))[0, 1])
+            mean_help = float(llm_confidence[helped].mean()) if helped.any() else float("nan")
+            mean_hurt = float(llm_confidence[hurt].mean()) if hurt.any() else float("nan")
+            mean_all = float(llm_confidence[mask].mean())
+            print("\n  [诊断·LLM 置信] 调用 %d 条｜自评置信均值 %.3f" % (called, mean_all))
+            print(f"         帮上 {int(helped.sum())} 条（均值 %.3f）｜帮倒忙 {int(hurt.sum())} 条（均值 %.3f）"
+                  % (mean_help, mean_hurt))
+            print(f"         置信 ↔ 帮上 的相关系数 {correlation:+.4f}"
+                  f"（>0.15 才算自评可信）")
 
     # 诊断：解释触发是否真的挑到了"会错"的样本
     wrong_before = pred_before != labels
