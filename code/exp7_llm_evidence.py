@@ -34,7 +34,7 @@ EPS = 1e-12
 
 # ===== 1. 模拟 LLM（换成真 LLM 时只改这一个函数）=====
 
-def simulate_llm(labels, n_classes, accuracy, temperature, rng):
+def simulate_llm(labels, n_classes, accuracy, temperature, rng, skill=None):
     """可控 stub：以 accuracy 的概率把质量压到真实类上，否则随机分散。
 
     返回 π（每个候选类的"支持度"，行归一化）。
@@ -42,7 +42,8 @@ def simulate_llm(labels, n_classes, accuracy, temperature, rng):
     """
     n_samples = len(labels)
     scores = rng.normal(0.0, 1.0, size=(n_samples, n_classes))
-    hit = rng.random(n_samples) < accuracy
+    threshold = accuracy if skill is None else skill[labels]   # 每条样本各自的"帮上概率"
+    hit = rng.random(n_samples) < threshold
     # 命中：真实类得分抬高；未命中：随机抬一个错类
     wrong = (labels + rng.integers(1, n_classes, n_samples)) % n_classes
     target = np.where(hit, labels, wrong)
@@ -50,6 +51,23 @@ def simulate_llm(labels, n_classes, accuracy, temperature, rng):
     scores = scores - scores.max(axis=1, keepdims=True)
     support = np.exp(scores)
     return support / support.sum(axis=1, keepdims=True)
+
+
+def build_skill_profile(train_labels, n_classes, rare_prob=0.9, common_prob=0.3, rare_frac=0.3):
+    """按**类频**造"LLM 帮助概率"（越稀有越高）。
+
+    为什么用类频：真实 LLM 靠外部语言知识，对**罕见但语义清晰**的概念更可能有帮助，
+    对模型早已见过上千次的高频类无新信息。关键是——**它只依赖数据（类频）**，
+    与我们的模型/vacuity/触发规则完全无关，因此检验"vacuity 触发"时**不循环**。
+    返回 (每个类的帮助概率, 每类的样本数)。
+    """
+    counts = np.bincount(train_labels, minlength=n_classes).astype(np.float64)
+    order = np.argsort(counts)                       # 出现次数升序 → 最稀有在前
+    rank = np.empty(n_classes, dtype=np.float64)
+    rank[order] = np.linspace(0.0, 1.0, n_classes)   # 0 = 最稀有，1 = 最常见
+    ramp = np.clip((rare_frac - rank) / max(rare_frac, EPS), 0.0, 1.0)
+    skill = common_prob + (rare_prob - common_prob) * ramp
+    return skill, counts
 
 
 # ===== 2. 触发规则 =====
@@ -122,6 +140,13 @@ def main():
     parser.add_argument("--budget", type=float, default=0.2)
     parser.add_argument("--stub-accuracy", type=float, default=0.7, help="模拟 LLM 的命中率")
     parser.add_argument("--stub-temperature", type=float, default=3.0, help="模拟 LLM 的置信程度")
+    parser.add_argument("--features", type=str, default=None,
+                        help="stub-mode=class-frequency 时必需：含 y_train 的 npz（用于统计类频）")
+    parser.add_argument("--stub-mode", default="uniform", choices=["uniform", "class-frequency"],
+                        help="uniform=每条样本同样概率；class-frequency=按类频（稀有类更易帮上，不循环）")
+    parser.add_argument("--skill-rare", type=float, default=0.9)
+    parser.add_argument("--skill-common", type=float, default=0.3)
+    parser.add_argument("--rare-frac", type=float, default=0.3, help="把最稀有的这一比例类视为'稀有'")
     parser.add_argument("--prior-mode", default="redistribute", choices=["redistribute", "additive"])
     parser.add_argument("--strength", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
@@ -134,13 +159,23 @@ def main():
     n_classes = alpha0.shape[1]
     rng = np.random.default_rng(args.seed)
 
+    skill = None
+    if args.stub_mode == "class-frequency":
+        if not args.features:
+            raise SystemExit("[错误] --stub-mode class-frequency 需要 --features（用 y_train 统计类频）")
+        train_labels = np.load(args.features, allow_pickle=True)["y_train"]
+        skill, counts = build_skill_profile(train_labels, n_classes, args.skill_rare,
+                                            args.skill_common, args.rare_frac)
+        print(f"[技能画像] 按类频：帮助概率 {skill.min():.2f}–{skill.max():.2f}"
+              f"（稀有 {args.rare_frac:.0%} 的类更高）")
+
     before = metrics_of(alpha0, labels)
     scores = {"vacuity": dirichlet_vacuity(alpha0), "conflict": dirichlet_conflict(alpha0, k=5),
               "maxprob": before["probs"].max(axis=1)}
 
     # 先算"LLM 真能救"的 oracle 收益：用 stub 的命中情况估计（真 LLM 时改用实测）
-    support_probe = simulate_llm(labels, n_classes, args.stub_accuracy,
-                                 args.stub_temperature, np.random.default_rng(args.seed + 1))
+    support_probe = simulate_llm(labels, n_classes, args.stub_accuracy, args.stub_temperature,
+                                 np.random.default_rng(args.seed + 1), skill=skill)
     alpha_probe, _ = inject_prior(alpha0, support_probe, np.ones(len(labels), bool),
                                   args.prior_mode, args.strength)
     fixed = (alpha0 / alpha0.sum(axis=1, keepdims=True)).argmax(axis=1) != labels
@@ -148,7 +183,7 @@ def main():
     oracle_benefit = (fixed & helped).astype(np.float64)
 
     mask = select_by_trigger(args.trigger, args.budget, scores, rng, oracle_benefit)
-    support = simulate_llm(labels, n_classes, args.stub_accuracy, args.stub_temperature, rng)
+    support = simulate_llm(labels, n_classes, args.stub_accuracy, args.stub_temperature, rng, skill=skill)
     alpha1, delta = inject_prior(alpha0, support, mask, args.prior_mode, args.strength)
     after = metrics_of(alpha1, labels)
 
@@ -169,6 +204,14 @@ def main():
         print("  ⚠️ 提醒：additive 模式下 vacuity 下降是**算术必然**，不能当作证据")
     print(f"  触发样本上的 Δconflict: "
           f"{float(np.mean(dirichlet_conflict(alpha1, 5)[mask] - dirichlet_conflict(alpha0, 5)[mask])):+.4f}")
+
+    if skill is not None:
+        skill_sample = skill[labels]
+        corr_vac = float(np.corrcoef(skill_sample, scores["vacuity"])[0, 1])
+        corr_con = float(np.corrcoef(skill_sample, scores["conflict"])[0, 1])
+        print(f"\n  [诊断] 技能(类频) vs vacuity 相关 = {corr_vac:+.4f}；"
+              f"vs conflict 相关 = {corr_con:+.4f}")
+        print("         （接近 0 说明：模型的不确定性并不指向 LLM 能帮上的地方）")
 
     # 分层：按 before 的 vacuity 四分位，看增益集中在哪
     quantiles = np.quantile(scores["vacuity"], [0.25, 0.5, 0.75])
