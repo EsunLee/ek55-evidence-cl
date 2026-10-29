@@ -176,6 +176,8 @@ def main():
 
     before = metrics_of(alpha0, labels)
 
+    scores = {"vacuity": dirichlet_vacuity(alpha0), "conflict": dirichlet_conflict(alpha0, k=5),
+              "maxprob": before["probs"].max(axis=1)}
     # 稀有度：rank 越大 = 越常见；rarity_c = 1 - rank（越罕见越高）
     if args.features:
         train_labels = np.load(args.features, allow_pickle=True)["y_train"]
@@ -190,8 +192,7 @@ def main():
     else:
         if args.trigger in ("expected_rarity", "rarity_oracle"):
             raise SystemExit("[错误] 这两个触发需要 --features（统计类频）")
-    scores = {"vacuity": dirichlet_vacuity(alpha0), "conflict": dirichlet_conflict(alpha0, k=5),
-              "maxprob": before["probs"].max(axis=1)}
+
 
     # 先算"LLM 真能救"的 oracle 收益：用 stub 的命中情况估计（真 LLM 时改用实测）
     # ⚠️ oracle 必须用**与正式运行同一次**的 stub 抽样（原来用"探针"另抽一次，
