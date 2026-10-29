@@ -70,6 +70,47 @@ def build_skill_profile(train_labels, n_classes, rare_prob=0.9, common_prob=0.3,
     return skill, counts
 
 
+def fit_logistic(features, labels, steps=400, lr=0.2, l2=1e-3):
+    """小逻辑回归（numpy + Adam）。输入已标准化。"""
+    n_samples, n_features = features.shape
+    weights = np.zeros(n_features)
+    bias = 0.0
+    m_w, v_w, m_b, v_b = np.zeros(n_features), np.zeros(n_features), 0.0, 0.0
+    beta1, beta2 = 0.9, 0.999
+    for step in range(1, steps + 1):
+        logits = features @ weights + bias
+        probs = 1.0 / (1.0 + np.exp(-np.clip(logits, -30, 30)))
+        grad = (probs - labels) / n_samples
+        grad_w = features.T @ grad + l2 * weights
+        grad_b = grad.sum()
+        for parameter, gradient, m, v in ((weights, grad_w, m_w, v_w), (bias, grad_b, m_b, v_b)):
+            m *= beta1
+            m += (1 - beta1) * gradient
+            v *= beta2
+            v += (1 - beta2) * gradient * gradient
+            m_hat = m / (1 - beta1 ** step)
+            v_hat = v / (1 - beta2 ** step)
+            if np.ndim(parameter) == 0:
+                parameter -= lr * m_hat / (np.sqrt(v_hat) + 1e-8)
+            else:
+                parameter -= lr * m_hat / (np.sqrt(v_hat) + 1e-8)
+    return weights, bias
+
+
+def learned_trigger_scores(features, benefit, folds=5, seed=0):
+    """交叉拟合：只在**其他折**的实测收益上训练，避免用自己这折的标签（防泄漏）。"""
+    n_samples = len(benefit)
+    scores = np.zeros(n_samples)
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(n_samples)
+    for fold in range(folds):
+        test_index = order[fold::folds]
+        train_index = np.setdiff1d(order, test_index)
+        weights, bias = fit_logistic(features[train_index], benefit[train_index])
+        scores[test_index] = 1.0 / (1.0 + np.exp(-np.clip(features[test_index] @ weights + bias, -30, 30)))
+    return scores
+
+
 # ===== 2. 触发规则 =====
 
 def select_by_trigger(trigger, budget, scores, rng, oracle_benefit=None):
@@ -85,6 +126,8 @@ def select_by_trigger(trigger, budget, scores, rng, oracle_benefit=None):
         mask[np.argsort(-scores["conflict"])[:count]] = True
     elif trigger == "confidence":                    # 基线：置信度低 → 该求助
         mask[np.argsort(scores["maxprob"])[:count]] = True
+    elif trigger == "learned":                    # 学出来的触发器（交叉拟合，防泄漏）
+        mask[np.argsort(-scores["learned"])[:count]] = True
     elif trigger == "expected_rarity":            # 部署可用：模型自己说"我要答的类多罕见"
         mask[np.argsort(-scores["expected_rarity"])[:count]] = True
     elif trigger == "rarity_oracle":              # 上界参照：真实类有多罕见（用到标签）
@@ -141,7 +184,7 @@ def main():
     parser.add_argument("--alpha", required=True, help="exp1 --export-alpha 的 npz")
     parser.add_argument("--trigger", default="vacuity",
                         choices=["vacuity", "conflict", "confidence", "random", "oracle",
-                                 "expected_rarity", "rarity_oracle"])
+                                 "expected_rarity", "rarity_oracle", "learned"])
     parser.add_argument("--budget", type=float, default=0.2)
     parser.add_argument("--stub-accuracy", type=float, default=0.7, help="模拟 LLM 的命中率")
     parser.add_argument("--stub-temperature", type=float, default=3.0, help="模拟 LLM 的置信程度")
@@ -204,6 +247,21 @@ def main():
     pred_all = (alpha_all / alpha_all.sum(axis=1, keepdims=True)).argmax(axis=1)
     oracle_benefit = ((pred_before != labels) & (pred_all == labels)).astype(np.float64)
 
+    # 学习式触发器的输入特征：全部可在推理时得到（不含标签）
+    sorted_probs = np.sort(before["probs"], axis=1)
+    diversity = {
+        "maxprob": sorted_probs[:, -1],
+        "margin": sorted_probs[:, -1] - sorted_probs[:, -2],
+        "negentropy": 1.0 + (before["probs"] * np.log(np.clip(before["probs"], EPS, None))).sum(axis=1),
+        "vacuity": scores["vacuity"],
+        "conflict": scores["conflict"],
+    }
+    if "expected_rarity" in scores:
+        diversity["expected_rarity"] = scores["expected_rarity"]
+    feature_matrix = np.column_stack([value for value in diversity.values()])
+    feature_matrix = (feature_matrix - feature_matrix.mean(axis=0)) / (feature_matrix.std(axis=0) + 1e-8)
+    scores["learned"] = learned_trigger_scores(feature_matrix, oracle_benefit, seed=args.seed)
+
     mask = select_by_trigger(args.trigger, args.budget, scores, rng, oracle_benefit)
     alpha1, delta = inject_prior(alpha0, support, mask, args.prior_mode, args.strength)
     after = metrics_of(alpha1, labels)
@@ -217,6 +275,12 @@ def main():
     for key in ("accuracy", "ece", "vacuity_mean", "conflict_mean"):
         delta_value = after[key] - before[key]
         print(f"  {key:<12}{before[key]:>10.4f}{after[key]:>10.4f}{delta_value:>+10.4f}")
+
+    # 诊断：解释触发是否真的挑到了"会错"的样本
+    wrong_before = pred_before != labels
+    flips = int(((pred_before != labels) & (after["probs"].argmax(axis=1) == labels) & mask).sum())
+    print(f"  被选样本中原本答错 {float(wrong_before[mask].mean()):.1%}"
+          f"（全体 {float(wrong_before.mean()):.1%}）；其中翻转修对 {flips} 条")
 
     # 关键检测：vacuity 的下降是否只是"注入证据量"的算术结果
     injected = float(delta.sum(axis=1).mean() / n_classes)
