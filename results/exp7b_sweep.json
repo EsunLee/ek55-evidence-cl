@@ -1,0 +1,182 @@
+{
+  "args": {
+    "alpha": "/data/ldy/ek55_assets/alpha_verb.npz",
+    "features": "/data/ldy/ek55_assets/ek55_verb_full.npz",
+    "strengths": "0.5,1,2,3,4,6",
+    "triggers": "confidence,vacuity,random,oracle",
+    "budget": 0.2,
+    "stub_accuracy": 0.7,
+    "stub_temperature": 3.0,
+    "stub_mode": "class-frequency",
+    "skill_rare": 0.9,
+    "skill_common": 0.3,
+    "rare_frac": 0.3,
+    "prior_mode": "redistribute",
+    "seed": 0,
+    "out": "results/exp7b_sweep.json"
+  },
+  "baseline_accuracy": 0.2772543741588156,
+  "table": {
+    "0.5": {
+      "confidence": {
+        "delta": 0.008075370121130576,
+        "up": 20,
+        "down": 8,
+        "wrong_rate": 0.8080808080808081
+      },
+      "vacuity": {
+        "delta": 0.0026917900403768402,
+        "up": 4,
+        "down": 0,
+        "wrong_rate": 0.6498316498316499
+      },
+      "random": {
+        "delta": 0.004037685060565288,
+        "up": 7,
+        "down": 1,
+        "wrong_rate": 0.7239057239057239
+      },
+      "oracle": {
+        "delta": 0.0309555854643338,
+        "up": 47,
+        "down": 1,
+        "wrong_rate": 0.7710437710437711
+      }
+    },
+    "1.0": {
+      "confidence": {
+        "delta": 0.015477792732166928,
+        "up": 40,
+        "down": 17,
+        "wrong_rate": 0.8080808080808081
+      },
+      "vacuity": {
+        "delta": 0.010094212651413192,
+        "up": 18,
+        "down": 3,
+        "wrong_rate": 0.6498316498316499
+      },
+      "random": {
+        "delta": 0.013458950201884257,
+        "up": 23,
+        "down": 3,
+        "wrong_rate": 0.7239057239057239
+      },
+      "oracle": {
+        "delta": 0.063257065948856,
+        "up": 101,
+        "down": 7,
+        "wrong_rate": 0.8114478114478114
+      }
+    },
+    "2.0": {
+      "confidence": {
+        "delta": 0.020188425302826385,
+        "up": 58,
+        "down": 28,
+        "wrong_rate": 0.8080808080808081
+      },
+      "vacuity": {
+        "delta": 0.017496635262449545,
+        "up": 39,
+        "down": 13,
+        "wrong_rate": 0.6498316498316499
+      },
+      "random": {
+        "delta": 0.01951547779273216,
+        "up": 37,
+        "down": 8,
+        "wrong_rate": 0.7239057239057239
+      },
+      "oracle": {
+        "delta": 0.1150740242261104,
+        "up": 182,
+        "down": 11,
+        "wrong_rate": 0.8518518518518519
+      }
+    },
+    "3.0": {
+      "confidence": {
+        "delta": 0.01816958277254377,
+        "up": 66,
+        "down": 39,
+        "wrong_rate": 0.8080808080808081
+      },
+      "vacuity": {
+        "delta": 0.009421265141318969,
+        "up": 46,
+        "down": 32,
+        "wrong_rate": 0.6498316498316499
+      },
+      "random": {
+        "delta": 0.016150740242261097,
+        "up": 46,
+        "down": 22,
+        "wrong_rate": 0.7239057239057239
+      },
+      "oracle": {
+        "delta": 0.13593539703903096,
+        "up": 217,
+        "down": 15,
+        "wrong_rate": 0.8956228956228957
+      }
+    },
+    "4.0": {
+      "confidence": {
+        "delta": 0.017496635262449545,
+        "up": 67,
+        "down": 41,
+        "wrong_rate": 0.8080808080808081
+      },
+      "vacuity": {
+        "delta": 0.005383580080753736,
+        "up": 49,
+        "down": 41,
+        "wrong_rate": 0.6498316498316499
+      },
+      "random": {
+        "delta": 0.009421265141318969,
+        "up": 47,
+        "down": 33,
+        "wrong_rate": 0.7239057239057239
+      },
+      "oracle": {
+        "delta": 0.14670255720053837,
+        "up": 230,
+        "down": 12,
+        "wrong_rate": 0.9158249158249159
+      }
+    },
+    "6.0": {
+      "confidence": {
+        "delta": 0.015477792732166928,
+        "up": 65,
+        "down": 42,
+        "wrong_rate": 0.8080808080808081
+      },
+      "vacuity": {
+        "delta": -0.0006729475100942239,
+        "up": 54,
+        "down": 55,
+        "wrong_rate": 0.6498316498316499
+      },
+      "random": {
+        "delta": 0.006056527590847904,
+        "up": 53,
+        "down": 44,
+        "wrong_rate": 0.7239057239057239
+      },
+      "oracle": {
+        "delta": 0.16218034993270525,
+        "up": 251,
+        "down": 10,
+        "wrong_rate": 0.9393939393939394
+      }
+    }
+  },
+  "best": {
+    "strength": 6.0,
+    "trigger": "oracle",
+    "delta": 0.16218034993270525
+  }
+}

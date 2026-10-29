@@ -1,0 +1,68 @@
+{
+  "args": {
+    "alpha": "/data/ldy/ek55_assets/alpha_verb.npz",
+    "trigger": "oracle",
+    "budget": 0.2,
+    "stub_accuracy": 0.7,
+    "stub_temperature": 3.0,
+    "prior_mode": "redistribute",
+    "strength": 0.3,
+    "seed": 0,
+    "out": "results/exp7_oracle.json"
+  },
+  "before": {
+    "accuracy": 0.2772543741588156,
+    "ece": 0.048410251544486665,
+    "vacuity_mean": 0.8558751660933787,
+    "conflict_mean": 0.858700629072066
+  },
+  "after": {
+    "accuracy": 0.29542395693135937,
+    "ece": 0.04411813930855083,
+    "vacuity_mean": 0.8558751660933787,
+    "conflict_mean": 0.8585599467482903
+  },
+  "delta": {
+    "accuracy": 0.01816958277254377,
+    "ece": -0.004292112235935834,
+    "vacuity_mean": 0.0,
+    "conflict_mean": -0.00014068232377573153
+  },
+  "called": 297,
+  "injected_evidence": 1.676156349810293e-18,
+  "quartiles": [
+    {
+      "quartile": 1,
+      "n": 372,
+      "before": 0.27419354838709675,
+      "after": 0.29838709677419356,
+      "delta": 0.024193548387096808,
+      "call_rate": 0.23387096774193547
+    },
+    {
+      "quartile": 2,
+      "n": 371,
+      "before": 0.215633423180593,
+      "after": 0.2371967654986523,
+      "delta": 0.021563342318059286,
+      "call_rate": 0.2668463611859838
+    },
+    {
+      "quartile": 3,
+      "n": 371,
+      "before": 0.2641509433962264,
+      "after": 0.2803234501347709,
+      "delta": 0.01617250673854448,
+      "call_rate": 0.24258760107816713
+    },
+    {
+      "quartile": 4,
+      "n": 372,
+      "before": 0.3548387096774194,
+      "after": 0.3655913978494624,
+      "delta": 0.010752688172043001,
+      "call_rate": 0.056451612903225805
+    }
+  ],
+  "note": "stub 用真实标签构造 LLM 输出，仅为模拟器；换真 LLM 时改 simulate_llm"
+}

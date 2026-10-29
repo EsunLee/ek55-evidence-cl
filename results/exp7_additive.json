@@ -1,0 +1,68 @@
+{
+  "args": {
+    "alpha": "/data/ldy/ek55_assets/alpha_verb.npz",
+    "trigger": "vacuity",
+    "budget": 0.2,
+    "stub_accuracy": 0.7,
+    "stub_temperature": 3.0,
+    "prior_mode": "additive",
+    "strength": 0.1,
+    "seed": 0,
+    "out": "results/exp7_additive.json"
+  },
+  "before": {
+    "accuracy": 0.2772543741588156,
+    "ece": 0.048410251544486665,
+    "vacuity_mean": 0.8558751660933787,
+    "conflict_mean": 0.858700629072066
+  },
+  "after": {
+    "accuracy": 0.27860026917900405,
+    "ece": 0.04277356746255428,
+    "vacuity_mean": 0.8397816426877908,
+    "conflict_mean": 0.8595358361044083
+  },
+  "delta": {
+    "accuracy": 0.0013458950201884479,
+    "ece": -0.005636684081932387,
+    "vacuity_mean": -0.016093523405587895,
+    "conflict_mean": 0.0008352070323423
+  },
+  "called": 297,
+  "injected_evidence": 0.022567430831344087,
+  "quartiles": [
+    {
+      "quartile": 1,
+      "n": 372,
+      "before": 0.27419354838709675,
+      "after": 0.27419354838709675,
+      "delta": 0.0,
+      "call_rate": 0.0
+    },
+    {
+      "quartile": 2,
+      "n": 371,
+      "before": 0.215633423180593,
+      "after": 0.215633423180593,
+      "delta": 0.0,
+      "call_rate": 0.0
+    },
+    {
+      "quartile": 3,
+      "n": 371,
+      "before": 0.2641509433962264,
+      "after": 0.2641509433962264,
+      "delta": 0.0,
+      "call_rate": 0.0
+    },
+    {
+      "quartile": 4,
+      "n": 372,
+      "before": 0.3548387096774194,
+      "after": 0.3602150537634409,
+      "delta": 0.005376344086021501,
+      "call_rate": 0.7983870967741935
+    }
+  ],
+  "note": "stub 用真实标签构造 LLM 输出，仅为模拟器；换真 LLM 时改 simulate_llm"
+}
