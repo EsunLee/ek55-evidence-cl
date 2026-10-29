@@ -78,7 +78,7 @@ def fit_logistic(features, labels, steps=400, lr=0.2, l2=1e-3):
     m_w, v_w, m_b, v_b = np.zeros(n_features), np.zeros(n_features), 0.0, 0.0
     beta1, beta2 = 0.9, 0.999
     for step in range(1, steps + 1):
-        logits = features @ weights + bias
+        logits = (features * weights[None, :]).sum(axis=1) + bias   # 用求和替代 matmul
         probs = 1.0 / (1.0 + np.exp(-np.clip(logits, -30, 30)))
         grad = (probs - labels) / n_samples
         grad_w = features.T @ grad + l2 * weights
@@ -105,7 +105,8 @@ def learned_trigger_scores(features, benefit, folds=5, seed=0):
         test_index = order[fold::folds]
         train_index = np.setdiff1d(order, test_index)
         weights, bias = fit_logistic(features[train_index], benefit[train_index])
-        scores[test_index] = 1.0 / (1.0 + np.exp(-np.clip(features[test_index] @ weights + bias, -30, 30)))
+        raw = (features[test_index] * weights[None, :]).sum(axis=1) + bias
+        scores[test_index] = 1.0 / (1.0 + np.exp(-np.clip(raw, -30, 30)))
     return scores
 
 
