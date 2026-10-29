@@ -17,10 +17,19 @@ import argparse
 import hashlib
 import json
 import os
+import socket as _socket
 import sys
 import time
 import urllib.error
 import urllib.request
+
+# ⚠️ 强制 IPv4：本机域名解析会同时给出 A 与 AAAA 记录，但服务器没有 IPv6 路由，
+# urllib 试到 IPv6 时会报 "[Errno 101] Network is unreachable"。设 LLM_ALLOW_IPV6=1 可恢复。
+if os.environ.get("LLM_ALLOW_IPV6", "") != "1":
+    _original_getaddrinfo = _socket.getaddrinfo
+    def _ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
+        return _original_getaddrinfo(host, port, _socket.AF_INET, type, proto, flags)
+    _socket.getaddrinfo = _ipv4_only
 
 DEFAULT_BASE = "https://api.openai.com/v1"
 DEFAULT_MODEL = "gpt-4o-mini"
