@@ -36,9 +36,11 @@ DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_CACHE = "/data/ldy/ek55_assets/llm_cache"
 
 
-def cache_key(prompt, model, temperature):
-    digest = hashlib.sha1(f"{model}|{temperature}|{prompt}".encode("utf-8")).hexdigest()
-    return digest
+def cache_key(prompt, model, temperature, max_tokens=None, extra_body=""):
+    """缓存键必须包含**全部影响输出的参数**，否则不同配置会互相命中缓存
+    （踩过：关推理与低推理两次实验被当成同一次）。"""
+    fingerprint = f"{model}|{temperature}|{max_tokens}|{extra_body}|{prompt}"
+    return hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()
 
 
 def read_cache(cache_dir, key):
@@ -114,7 +116,9 @@ def ask(prompt, model=None, temperature=0.0, api_base=None, api_key=None,
     if offline:
         return '{"ranking": [], "confidence": 0.5, "_offline": true}'
 
-    key = cache_key(prompt, model, temperature)
+    key = cache_key(prompt, model, temperature,
+                    int(os.environ.get("LLM_MAX_TOKENS", "2048")),
+                    os.environ.get("LLM_EXTRA_BODY", ""))
     cached = read_cache(cache_dir, key)
     if cached is not None:
         return cached["text"]
