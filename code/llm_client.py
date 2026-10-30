@@ -57,15 +57,25 @@ def write_cache(cache_dir, key, payload):
 
 
 def call_api(prompt, model, temperature, api_base, api_key, timeout=30, retries=2,
-             max_tokens=800, transport=None):
+             max_tokens=None, transport=None):
     """调用 /chat/completions。transport 可注入（自检时替换成假函数）。"""
     url = api_base.rstrip("/") + "/chat/completions"
-    body = json.dumps({
+    if max_tokens is None:
+        max_tokens = int(os.environ.get("LLM_MAX_TOKENS", "2048"))
+    request_body = {
         "model": model,
         "temperature": temperature,
-        "max_tokens": max_tokens,          # 推理型模型会把预算花在思考上，太小会导致空回复
+        "max_tokens": max_tokens,          # 推理型模型会把预算花在思考上，太小会得到空回复
         "messages": [{"role": "user", "content": prompt}],
-    }).encode("utf-8")
+    }
+    # 额外参数透传：例如 {"enable_thinking": false} 关掉推理（不同网关字段不同）
+    extra = os.environ.get("LLM_EXTRA_BODY", "").strip()
+    if extra:
+        try:
+            request_body.update(json.loads(extra))
+        except json.JSONDecodeError:
+            raise SystemExit(f"[错误] LLM_EXTRA_BODY 不是合法 JSON：{extra}")
+    body = json.dumps(request_body).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -94,7 +104,7 @@ def extract_text(payload):
 
 
 def ask(prompt, model=None, temperature=0.0, api_base=None, api_key=None,
-        cache_dir=None, offline=False, transport=None, max_tokens=800):
+        cache_dir=None, offline=False, transport=None, max_tokens=None):
     """带缓存的一次问答。offline=True 时返回固定桩（用于打通流程，不花钱）。"""
     model = model or os.environ.get("LLM_MODEL", DEFAULT_MODEL)
     api_base = api_base or os.environ.get("LLM_API_BASE", DEFAULT_BASE)
@@ -118,8 +128,10 @@ def ask(prompt, model=None, temperature=0.0, api_base=None, api_key=None,
         finish = choices[0].get("finish_reason") or ""
     if not text.strip():
         # ⚠️ 空回复**不写缓存**：否则重跑会命中空缓存，永远得不到答案
-        raise RuntimeError(f"LLM 返回空内容（finish_reason={finish or '?'}）；"
-                           f"推理型模型常见于 max_tokens 太小，已跳过缓存以便重试")
+        usage = payload.get("usage") or {}
+        raise RuntimeError(f"LLM 返回空内容（finish_reason={finish or '?'}, "
+                           f"max_tokens={max_tokens}, usage={usage}）；"
+                           f"推理型模型常见于预算被思考耗尽，已跳过缓存以便重试")
     write_cache(cache_dir, key, {"text": text, "model": model, "temperature": temperature,
                                  "finish_reason": finish, "usage": payload.get("usage")})
     return text
