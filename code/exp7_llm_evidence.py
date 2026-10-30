@@ -319,12 +319,16 @@ def inject_prior(alpha, support, mask, mode, strength):
 # ===== 4. 主流程 =====
 
 def metrics_of(alpha, labels):
+    from metrics import brier_score, ece_adaptive, nll_score
     strength = alpha.sum(axis=1, keepdims=True)
     probs = alpha / strength
     pred = probs.argmax(axis=1)
     return {
         "accuracy": float((pred == labels).mean()),
         "ece": float(ece_equal_width(probs, labels)),
+        "ece_adaptive": float(ece_adaptive(probs, labels)),
+        "nll": float(nll_score(probs, labels)),
+        "brier": float(brier_score(probs, labels)),
         "vacuity_mean": float(np.mean(dirichlet_vacuity(alpha))),
         "conflict_mean": float(np.mean(dirichlet_conflict(alpha, k=5))),
         "probs": probs,
