@@ -72,7 +72,7 @@ def build_skill_profile(train_labels, n_classes, rare_prob=0.9, common_prob=0.3,
     return skill, counts
 
 
-def collect_llm_supports(args, mask, n_classes):
+def collect_llm_supports(args, mask, n_classes, probs=None):
     """对选中的样本调用真 LLM，返回 (support [N,K], confidence [N])。
 
     只对 mask=True 的样本花钱；其余行留空（后续只用到 mask 行）。
@@ -89,6 +89,9 @@ def collect_llm_supports(args, mask, n_classes):
     support = np.zeros((len(mask), n_classes), dtype=np.float64)
     confidence = np.ones(len(mask), dtype=np.float64)
 
+    if args.llm_ask_mode == "rerank" and probs is None:
+        raise SystemExit("[错误] rerank 模式需要模型概率")
+
     indices = np.flatnonzero(mask)
     if args.llm_limit > 0:
         indices = indices[:args.llm_limit]
@@ -99,13 +102,28 @@ def collect_llm_supports(args, mask, n_classes):
     import time as _time
     started = _time.time()
     for done, index in enumerate(indices, start=1):
-        prompt = build_prompt(past_verb[index], past_noun[index], candidate_names,
-                              verb_names, noun_names)
+        if args.llm_ask_mode == "rerank":
+            # 只把模型 top-k 交给 LLM 仲裁：支持度也只允许落在这些类上
+            top_k = min(args.llm_rerank_topk, n_classes)
+            local = np.argsort(-probs[index])[:top_k]
+            local_names = [candidate_names[int(c)] for c in local]
+            prompt = build_prompt(past_verb[index], past_noun[index], local_names,
+                                  verb_names, noun_names)
+        else:
+            local = np.arange(n_classes)
+            local_names = candidate_names
+            prompt = build_prompt(past_verb[index], past_noun[index], candidate_names,
+                                  verb_names, noun_names)
         call_started = _time.time()
         text = llm_ask(prompt, cache_dir=args.llm_cache)
         elapsed = _time.time() - call_started
         ranking, conf = parse_response(text)
-        support[index] = ranking_to_support(ranking, candidate_names, conf)
+        if args.llm_ask_mode == "rerank":
+            local_support = ranking_to_support(ranking, local_names, conf)
+            support[index] = 0.0
+            support[index, local] = local_support
+        else:
+            support[index] = ranking_to_support(ranking, candidate_names, conf)
         confidence[index] = 0.7 if conf is None else float(np.clip(conf, 0.05, 1.0))
         print(f"[LLM] {done}/{len(indices)} 本条 {elapsed:.1f}s  "
               f"累计 {_time.time() - started:.0f}s", flush=True)
@@ -287,6 +305,9 @@ def main():
     parser.add_argument("--verb-names", default="/data/datasets/EPIC-KITCHENS/annotations/EPIC_verb_classes.csv")
     parser.add_argument("--noun-names", default="/data/datasets/EPIC-KITCHENS/annotations/EPIC_noun_classes.csv")
     parser.add_argument("--llm-cache", default="/data/ldy/ek55_assets/llm_cache")
+    parser.add_argument("--llm-ask-mode", default="full", choices=["full", "rerank"],
+                        help="full=在全部候选里问；rerank=只在模型 top-k 里仲裁（任务更小，更不容易带偏）")
+    parser.add_argument("--llm-rerank-topk", type=int, default=3)
     parser.add_argument("--llm-limit", type=int, default=0, help="最多调用多少条（0=全部选中的）")
     parser.add_argument("--llm-confidence-weight", action="store_true",
                         help="用 LLM 的 confidence 调节注入强度（即'证据增加量 c'这一路）")
@@ -408,7 +429,8 @@ def main():
     if args.llm_mode == "real":
         if "past_verb_test" not in np.load(args.features, allow_pickle=True).files:
             raise SystemExit("[错误] 需要 --with-text 重建的 npz（含 past_verb_test）")
-        llm_support, llm_confidence = collect_llm_supports(args, mask, n_classes)
+        llm_support, llm_confidence = collect_llm_supports(
+            args, mask, n_classes, probs=before["probs"])
         support = np.where(mask[:, None], llm_support, support)
     # 逐样本修正力度（均值对齐，保证与 fixed 的"总预算"可比）
     if args.strength_mode == "fixed":
