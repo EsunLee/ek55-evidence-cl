@@ -107,7 +107,15 @@ def cross_fitted_temperature_ece(probs, labels, folds=5, seed=0):
                 best_temperature = float(temperature)
         temperatures.append(best_temperature)
         scaled[held_out] = softmax_rows_local(logits[held_out] / best_temperature)
-    return float(ece_equal_width(scaled, labels)), temperatures
+    # 多指标交叉验证：ECE（等宽/自适应）、NLL、Brier —— 只用 ECE 可能被分箱方式"帮到"
+    from metrics import brier_score, ece_adaptive, nll_score
+    summary = {
+        "ece_equal_width": float(ece_equal_width(scaled, labels)),
+        "ece_adaptive": float(ece_adaptive(scaled, labels)),
+        "nll": float(nll_score(scaled, labels)),
+        "brier": float(brier_score(scaled, labels)),
+    }
+    return summary, temperatures
 
 
 def collect_llm_supports(args, mask, n_classes, probs=None):
@@ -505,13 +513,20 @@ def main():
 
     post_hoc = None
     if args.post_hoc_temp:
-        ece_after_temp, temperatures = cross_fitted_temperature_ece(after["probs"], labels)
-        post_hoc = {"ece_after_temperature": ece_after_temp,
+        summary, temperatures = cross_fitted_temperature_ece(after["probs"], labels)
+        post_hoc = {"after_temperature": summary,
                     "temperatures": temperatures,
-                    "delta_vs_before": ece_after_temp - before["ece"]}
-        print(f"\n  [事后温度缩放] 交叉拟合 ECE = {ece_after_temp:.4f}"
-              f"（原始 {before['ece']:.4f} → 注入后 {after['ece']:.4f} → 缩放后 {ece_after_temp:.4f}）")
-        print(f"          各折温度：{[round(item, 2) for item in temperatures]}")
+                    "ece_delta_vs_before": summary["ece_equal_width"] - before["ece"]}
+        print(f"\n  [事后温度缩放] 交叉拟合结果（各折温度 {[round(item, 2) for item in temperatures]}）")
+        print(f"          {'指标':<12}{'基线':>10}{'注入后':>10}{'缩放后':>10}")
+        print(f"          {'ECE(等宽)':<12}{before['ece']:>10.4f}{after['ece']:>10.4f}"
+              f"{summary['ece_equal_width']:>10.4f}")
+        print(f"          {'ECE(自适应)':<11}{before.get('ece_adaptive', float('nan')):>10.4f}"
+              f"{after.get('ece_adaptive', float('nan')):>10.4f}{summary['ece_adaptive']:>10.4f}")
+        print(f"          {'NLL':<12}{before.get('nll', float('nan')):>10.4f}"
+              f"{after.get('nll', float('nan')):>10.4f}{summary['nll']:>10.4f}")
+        print(f"          {'Brier':<12}{before.get('brier', float('nan')):>10.4f}"
+              f"{after.get('brier', float('nan')):>10.4f}{summary['brier']:>10.4f}")
 
     # 诊断（真 LLM 模式）：LLM 的自我置信是否对应它实际的帮助？
     # 这是"证据作为度量"能否成立的核心检验——若 confidence 高的样本并没有更常被修对，
