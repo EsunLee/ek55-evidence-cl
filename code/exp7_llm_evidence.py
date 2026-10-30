@@ -72,6 +72,33 @@ def build_skill_profile(train_labels, n_classes, rare_prob=0.9, common_prob=0.3,
     return skill, counts
 
 
+def softmax_rows_local(logits):
+    shifted = logits - logits.max(axis=1, keepdims=True)
+    exponentiated = np.exp(shifted)
+    return exponentiated / exponentiated.sum(axis=1, keepdims=True)
+
+
+def cross_fitted_temperature_ece(probs, labels, folds=5, seed=0):
+    """注入后再做温度缩放：**交叉拟合**（在其余折上拟温度，只作用于本折）。
+
+    为什么必须交叉拟合：我们没有独立的验证集，若在测试集上拟温度再在同一批上评估，
+    等于用答案调参。分折拟合并交叉评估可以避免这一点。
+    """
+    from metrics import ece_equal_width, fit_temperature
+    logits = np.log(np.clip(probs, 1e-12, None))
+    scaled = np.empty_like(probs)
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(len(labels))
+    temperatures = []
+    for fold in range(folds):
+        held_out = order[fold::folds]
+        remaining = np.setdiff1d(order, held_out)
+        temperature, _ = fit_temperature(logits[remaining], labels[remaining])
+        temperatures.append(float(temperature))
+        scaled[held_out] = softmax_rows_local(logits[held_out] / temperature)
+    return float(ece_equal_width(scaled, labels)), temperatures
+
+
 def collect_llm_supports(args, mask, n_classes, probs=None):
     """对选中的样本调用真 LLM，返回 (support [N,K], confidence [N])。
 
@@ -305,6 +332,8 @@ def main():
     parser.add_argument("--skill-rare", type=float, default=0.9)
     parser.add_argument("--skill-common", type=float, default=0.3)
     parser.add_argument("--rare-frac", type=float, default=0.3, help="把最稀有的这一比例类视为'稀有'")
+    parser.add_argument("--post-hoc-temp", action="store_true",
+                        help="注入后做交叉拟合的温度缩放，报告缩放后的 ECE")
     parser.add_argument("--llm-mode", default="stub", choices=["stub", "real"],
                         help="stub=模拟器（默认）；real=真调 LLM（需 LLM_API_KEY）")
     parser.add_argument("--verb-names", default="/data/datasets/EPIC-KITCHENS/annotations/EPIC_verb_classes.csv")
@@ -463,6 +492,16 @@ def main():
         delta_value = after[key] - before[key]
         print(f"  {key:<12}{before[key]:>10.4f}{after[key]:>10.4f}{delta_value:>+10.4f}")
 
+    post_hoc = None
+    if args.post_hoc_temp:
+        ece_after_temp, temperatures = cross_fitted_temperature_ece(after["probs"], labels)
+        post_hoc = {"ece_after_temperature": ece_after_temp,
+                    "temperatures": temperatures,
+                    "delta_vs_before": ece_after_temp - before["ece"]}
+        print(f"\n  [事后温度缩放] 交叉拟合 ECE = {ece_after_temp:.4f}"
+              f"（原始 {before['ece']:.4f} → 注入后 {after['ece']:.4f} → 缩放后 {ece_after_temp:.4f}）")
+        print(f"          各折温度：{[round(item, 2) for item in temperatures]}")
+
     # 诊断（真 LLM 模式）：LLM 的自我置信是否对应它实际的帮助？
     # 这是"证据作为度量"能否成立的核心检验——若 confidence 高的样本并没有更常被修对，
     # 那么用 LLM 的置信去驱动 vacuity 注入就是无依据的。
@@ -531,6 +570,7 @@ def main():
         "before": {k: v for k, v in before.items() if k != "probs"},
         "after": {k: v for k, v in after.items() if k != "probs"},
         "delta": {k: after[k] - before[k] for k in ("accuracy", "ece", "vacuity_mean", "conflict_mean")},
+        "post_hoc_temperature": post_hoc,
         "called": int(mask.sum()),
         "injected_evidence": injected,
         "quartiles": layers,
