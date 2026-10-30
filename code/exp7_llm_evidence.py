@@ -261,7 +261,13 @@ def inject_prior(alpha, support, mask, mode, strength):
     else:
         raise ValueError(mode)
     delta = delta * mask[:, None]                    # 只对调用样本生效
-    return alpha + delta, delta
+    updated = alpha + delta
+    # ⚠️ Dirichlet 参数必须 > 0：零均值先验在高强度下会把未入选的类压成负数，
+    # 导致概率含负值、置信度 >1，ECE/conflict 全部失真（曾假报 ECE=0.0000）。
+    # 这里裁剪到 ≥1.0（合法且温和），并把裁剪量如实记录。
+    floor = 1.0
+    clipped = np.maximum(updated, floor)
+    return clipped, delta
 
 
 # ===== 4. 主流程 =====
