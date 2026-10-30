@@ -97,7 +97,6 @@ def collect_llm_supports(args, mask, n_classes, probs=None):
         indices = indices[:args.llm_limit]
     queried = np.zeros(len(mask), dtype=bool)
     queried[indices] = True
-    args._queried = queried                      # 供后续诊断只统计真正查询过的样本
     print(f"[LLM] 将调用 {len(indices)} 条（缓存目录 {args.llm_cache}）", flush=True)
     import time as _time
     started = _time.time()
@@ -127,7 +126,7 @@ def collect_llm_supports(args, mask, n_classes, probs=None):
         confidence[index] = 0.7 if conf is None else float(np.clip(conf, 0.05, 1.0))
         print(f"[LLM] {done}/{len(indices)} 本条 {elapsed:.1f}s  "
               f"累计 {_time.time() - started:.0f}s", flush=True)
-    return support, confidence
+    return support, confidence, queried
 
 
 def fit_logistic(features, labels, steps=400, lr=0.2, l2=1e-3):
@@ -426,10 +425,11 @@ def main():
     mask = select_by_trigger(args.trigger, args.budget, scores, rng, oracle_benefit)
 
     llm_confidence = None
+    llm_queried = None
     if args.llm_mode == "real":
         if "past_verb_test" not in np.load(args.features, allow_pickle=True).files:
             raise SystemExit("[错误] 需要 --with-text 重建的 npz（含 past_verb_test）")
-        llm_support, llm_confidence = collect_llm_supports(
+        llm_support, llm_confidence, llm_queried = collect_llm_supports(
             args, mask, n_classes, probs=before["probs"])
         support = np.where(mask[:, None], llm_support, support)
     # 逐样本修正力度（均值对齐，保证与 fixed 的"总预算"可比）
@@ -461,7 +461,7 @@ def main():
     # 这是"证据作为度量"能否成立的核心检验——若 confidence 高的样本并没有更常被修对，
     # 那么用 LLM 的置信去驱动 vacuity 注入就是无依据的。
     if args.llm_mode == "real" and llm_confidence is not None:
-        queried_mask = getattr(args, "_queried", mask)     # 只统计真正调用过 LLM 的样本
+        queried_mask = llm_queried if llm_queried is not None else mask     # 只统计真正调用过 LLM 的样本
         pred_after_now = after["probs"].argmax(axis=1)
         helped = queried_mask & (pred_before != labels) & (pred_after_now == labels)
         hurt = queried_mask & (pred_before == labels) & (pred_after_now != labels)
@@ -533,7 +533,7 @@ def main():
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            json.dump(payload, handle, ensure_ascii=False, indent=2, default=str)
         print(f"\n[落盘] {args.out}")
     return 0
 
