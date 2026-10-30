@@ -84,22 +84,29 @@ def cross_fitted_temperature_ece(probs, labels, folds=5, seed=0):
     为什么必须交叉拟合：我们没有独立的验证集，若在测试集上拟温度再在同一批上评估，
     等于用答案调参。分折拟合并交叉评估可以避免这一点。
     """
-    from metrics import ece_equal_width, fit_temperature
+    from metrics import ece_equal_width
     logits = np.log(np.clip(probs, 1e-12, None))
     scaled = np.empty_like(probs)
     rng = np.random.default_rng(seed)
     order = rng.permutation(len(labels))
     temperatures = []
+    # 注入后概率接近 one-hot，最优温度可能很大 → 网格覆盖到 200
+    grid_temperature = np.concatenate([np.linspace(0.5, 5.0, 46),
+                                       np.linspace(5.5, 200.0, 78)])
     for fold in range(folds):
         held_out = order[fold::folds]
         remaining = np.setdiff1d(order, held_out)
-        # 注入后概率接近 one-hot，最优温度常在 20 之外 → 用更宽的网格
-        grid_temperature = np.concatenate([np.linspace(0.5, 5.0, 46),
-                                           np.linspace(5.5, 200.0, 78)])
-        temperature, _ = fit_temperature(logits[remaining], labels[remaining],
-                                         grid=grid_temperature)
-        temperatures.append(float(temperature))
-        scaled[held_out] = softmax_rows_local(logits[held_out] / temperature)
+        # 直接以 **ECE** 为目标选温度（NLL 最优温度常把 ECE 弄差，自检踩过）
+        best_temperature = 1.0
+        best_ece = np.inf
+        for temperature in grid_temperature:
+            candidate = softmax_rows_local(logits[remaining] / temperature)
+            value = ece_equal_width(candidate, labels[remaining])
+            if value < best_ece:
+                best_ece = value
+                best_temperature = float(temperature)
+        temperatures.append(best_temperature)
+        scaled[held_out] = softmax_rows_local(logits[held_out] / best_temperature)
     return float(ece_equal_width(scaled, labels)), temperatures
 
 
