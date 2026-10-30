@@ -75,6 +75,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--npz", default=DEFAULT_NPZ)
     parser.add_argument("--max-tokens", type=int, default=512)
+    parser.add_argument("--models", default="",
+                        help="逗号分隔的模型 id 列表：逐个用同一个真实 prompt 测速与是否空回复")
     args = parser.parse_args()
 
     api_base = os.environ.get("LLM_API_BASE", "")
@@ -84,6 +86,24 @@ def main():
         raise SystemExit("[错误] 需要 LLM_API_BASE / LLM_API_KEY / LLM_MODEL")
 
     prompt = load_one_prompt(args.npz)
+
+    if args.models:
+        # 换模型扫描：统一用"关推理"配置，比较耗时/是否空回复/回答是否含上下文
+        print(f"[模型扫描] prompt={len(prompt)} 字符 max_tokens={args.max_tokens}\n")
+        no_thinking = {"chat_template_kwargs": {"enable_thinking": False}}
+        for candidate in [item.strip() for item in args.models.split(",") if item.strip()]:
+            try:
+                result = call(prompt, no_thinking, args.max_tokens, api_base, api_key, candidate)
+                ok = bool(result["text"])
+                print(f"  {candidate:<40} {result['elapsed']:>6.1f}s  "
+                      f"reasoning={result['reasoning_tokens']:<5} {'✅' if ok else '❌ 空'}  "
+                      f"{result['text'][:110]}")
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode("utf-8", "ignore")[:120]
+                print(f"  {candidate:<40} HTTP {error.code}  {detail}")
+            except Exception as error:
+                print(f"  {candidate:<40} 失败：{error}")
+        return 0
     print(f"[探针] model={model} prompt={len(prompt)} 字符 max_tokens={args.max_tokens}\n")
 
     rows = []
