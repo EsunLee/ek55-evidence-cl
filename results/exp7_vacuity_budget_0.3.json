@@ -1,0 +1,84 @@
+{
+  "args": {
+    "preset": "verb",
+    "alpha": "/data/ldy/ek55_assets/alpha_verb.npz",
+    "trigger": "vacuity",
+    "budget": 0.3,
+    "stub_accuracy": 0.7,
+    "stub_temperature": 3.0,
+    "feature_readout": "pooled",
+    "features": "/data/ldy/ek55_assets/ek55_verb_full_text.npz",
+    "stub_mode": "uniform",
+    "skill_rare": 0.9,
+    "skill_common": 0.3,
+    "rare_frac": 0.3,
+    "llm_mode": "real",
+    "verb_names": "/data/datasets/EPIC-KITCHENS/annotations/EPIC_verb_classes.csv",
+    "noun_names": "/data/datasets/EPIC-KITCHENS/annotations/EPIC_noun_classes.csv",
+    "llm_cache": "/data/ldy/ek55_assets/llm_cache",
+    "llm_ask_mode": "rerank",
+    "llm_rerank_topk": 3,
+    "llm_limit": 0,
+    "llm_confidence_weight": false,
+    "prior_mode": "additive",
+    "strength": 1.0,
+    "strength_mode": "fixed",
+    "seed": 0,
+    "out": "results/exp7_vacuity_budget_0.3.json"
+  },
+  "before": {
+    "accuracy": 0.2772543741588156,
+    "ece": 0.048410251544486665,
+    "vacuity_mean": 0.8558751660933787,
+    "conflict_mean": 0.858700629072066
+  },
+  "after": {
+    "accuracy": 0.30148048452220727,
+    "ece": 0.07466654174598679,
+    "vacuity_mean": 0.46104890089442635,
+    "conflict_mean": 0.8379084076546266
+  },
+  "delta": {
+    "accuracy": 0.024226110363391673,
+    "ece": 0.026256290201500124,
+    "vacuity_mean": -0.3948262651989523,
+    "conflict_mean": -0.020792221417439416
+  },
+  "called": 446,
+  "injected_evidence": 0.34138496240618604,
+  "quartiles": [
+    {
+      "quartile": 1,
+      "n": 372,
+      "before": 0.27419354838709675,
+      "after": 0.27419354838709675,
+      "delta": 0.0,
+      "call_rate": 0.0
+    },
+    {
+      "quartile": 2,
+      "n": 371,
+      "before": 0.215633423180593,
+      "after": 0.215633423180593,
+      "delta": 0.0,
+      "call_rate": 0.0
+    },
+    {
+      "quartile": 3,
+      "n": 371,
+      "before": 0.2641509433962264,
+      "after": 0.2668463611859838,
+      "delta": 0.002695417789757404,
+      "call_rate": 0.19946091644204852
+    },
+    {
+      "quartile": 4,
+      "n": 372,
+      "before": 0.3548387096774194,
+      "after": 0.4489247311827957,
+      "delta": 0.09408602150537632,
+      "call_rate": 1.0
+    }
+  ],
+  "note": "stub 用真实标签构造 LLM 输出，仅为模拟器；换真 LLM 时改 simulate_llm"
+}
