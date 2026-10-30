@@ -41,6 +41,18 @@ def load_one_prompt(npz_path):
                         candidates, verb_names, noun_names)
 
 
+def load_one_prompt_truncated(npz_path, top_n):
+    """截断候选表：用来验证"任务越简单，推理越短"这一假设。"""
+    import numpy as np
+    data = np.load(npz_path, allow_pickle=True)
+    classes = json.loads(str(data["meta"]))["classes"]
+    verb_names = load_class_names(VERB_CSV)
+    noun_names = load_class_names(NOUN_CSV)
+    candidates = [verb_names.get(int(cid), f"verb{cid}") for cid in classes][:top_n]
+    return build_prompt(data["past_verb_test"][0], data["past_noun_test"][0],
+                        candidates, verb_names, noun_names)
+
+
 def call(prompt, extra, max_tokens, api_base, api_key, model, timeout=90):
     body = {
         "model": model,
@@ -75,6 +87,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--npz", default=DEFAULT_NPZ)
     parser.add_argument("--max-tokens", type=int, default=512)
+    parser.add_argument("--top-candidates", type=int, default=0,
+                        help="只保留前 N 个候选（测试'任务更简单→推理更短'的假设）")
     parser.add_argument("--models", default="",
                         help="逗号分隔的模型 id 列表：逐个用同一个真实 prompt 测速与是否空回复")
     args = parser.parse_args()
@@ -85,7 +99,8 @@ def main():
     if not (api_base and api_key and model):
         raise SystemExit("[错误] 需要 LLM_API_BASE / LLM_API_KEY / LLM_MODEL")
 
-    prompt = load_one_prompt(args.npz)
+    prompt = (load_one_prompt_truncated(args.npz, args.top_candidates)
+              if args.top_candidates else load_one_prompt(args.npz))
 
     if args.models:
         # 换模型扫描：统一用"关推理"配置，比较耗时/是否空回复/回答是否含上下文
