@@ -93,7 +93,11 @@ def cross_fitted_temperature_ece(probs, labels, folds=5, seed=0):
     for fold in range(folds):
         held_out = order[fold::folds]
         remaining = np.setdiff1d(order, held_out)
-        temperature, _ = fit_temperature(logits[remaining], labels[remaining])
+        # 注入后概率接近 one-hot，最优温度常在 20 之外 → 用更宽的网格
+        grid_temperature = np.concatenate([np.linspace(0.5, 5.0, 46),
+                                           np.linspace(5.5, 200.0, 78)])
+        temperature, _ = fit_temperature(logits[remaining], labels[remaining],
+                                         grid=grid_temperature)
         temperatures.append(float(temperature))
         scaled[held_out] = softmax_rows_local(logits[held_out] / temperature)
     return float(ece_equal_width(scaled, labels)), temperatures
