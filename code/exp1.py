@@ -68,6 +68,10 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument("--head", default="linear", choices=["linear", "mlp"],
+                        help="C1 分类头：linear=线性探针（弱）；mlp=两层 MLP（强，用于检验 H2 表示充分性假设）")
+    parser.add_argument("--hidden", type=int, default=512, help="mlp 头的隐层维度")
+    parser.add_argument("--dropout", type=float, default=0.3, help="mlp 头的 dropout")
     parser.add_argument("--lambda-inf", type=float, default=0.0,
                         help="L_inf（trigamma 信息平衡）权重；默认 0，先跑纯 EDL 再逐步加")
     parser.add_argument("--lambda-fit", type=float, default=0.1,
@@ -393,6 +397,63 @@ class EvidenceHeadMean(nn.Module):
         return features, alpha
 
 
+class MLPTrunk(nn.Module):
+    """强 C1 的共享主干：Linear → GELU → Dropout。
+
+    为什么需要它：综述的 H2（表示充分性假设）预测"当 C1 已经足够强时，
+    语言/L​LM 的边际收益会下降"。要检验这条，必须把 C1 从线性探针换成更强的头。
+    """
+
+    def __init__(self, dim, hidden, dropout):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_features=dim, out_features=hidden),
+            nn.GELU(),
+            nn.Dropout(p=dropout),
+        )
+
+    def forward(self, features):
+        hidden = self.net(features)
+        return hidden
+
+
+class MLPHead(nn.Module):
+    """强基线：MLP 主干 + 线性分类头 + 交叉熵。"""
+
+    def __init__(self, dim, n_classes, hidden, dropout):
+        super().__init__()
+        self.trunk = MLPTrunk(dim, hidden, dropout)
+        self.classifier = nn.Linear(in_features=hidden, out_features=n_classes)
+
+    def forward(self, features):
+        hidden = self.trunk(features)
+        logits = self.classifier(hidden)
+        return features, logits
+
+
+class MLPHeadMean(nn.Module):
+    """强 C1 版的证据头：与 MLPHead 完全同构的 logit 路径 + 单独的浓度头。
+
+    保持"α = α0(x)·softmax(logits)"这一解耦参数化，因此
+        log α − log Σα ≡ log p
+    精度与同结构基线一致，浓度只影响 vacuity。
+    """
+
+    def __init__(self, dim, n_classes, hidden, dropout):
+        super().__init__()
+        self.trunk = MLPTrunk(dim, hidden, dropout)
+        self.logits = nn.Linear(in_features=hidden, out_features=n_classes)
+        self.concentration = nn.Linear(in_features=hidden, out_features=1)
+
+    def forward(self, features):
+        hidden = self.trunk(features)
+        logits = self.logits(hidden)
+        probs = torch.softmax(logits, dim=1)
+        strength = self.logits.out_features * (1.0 + torch.nn.functional.softplus(self.concentration(hidden)))
+        alpha = probs * strength
+        return features, alpha
+
+
 class LastKPool(nn.Module):
     """取最后 k 段做均值：最朴素的"重近轻远"读出，无参数。"""
 
@@ -643,13 +704,23 @@ def main():
           f"，维度 {dim}，类别 {args.n_classes}，设备 {device}")
 
     # --- 7.1 训练两个头 ---
-    baseline_model = wrap_readout(LinearHead(dim=dim, n_classes=args.n_classes), args, dim).to(device)
+    if args.head == "mlp":
+        baseline_head = MLPHead(dim=dim, n_classes=args.n_classes,
+                                hidden=args.hidden, dropout=args.dropout)
+    else:
+        baseline_head = LinearHead(dim=dim, n_classes=args.n_classes)
+    baseline_model = wrap_readout(baseline_head, args, dim).to(device)
     started = time.time()
     baseline_model, baseline_val_nll = train_baseline(baseline_model, bundle, args, device)
     baseline_seconds = time.time() - started
 
-    evidence_class = EvidenceHeadMean if args.evidence_param == "mean" else EvidenceHead
-    evidence_model = wrap_readout(evidence_class(dim=dim, n_classes=args.n_classes), args, dim).to(device)
+    if args.head == "mlp":
+        evidence_model = wrap_readout(
+            MLPHeadMean(dim=dim, n_classes=args.n_classes, hidden=args.hidden, dropout=args.dropout),
+            args, dim).to(device)
+    else:
+        evidence_class = EvidenceHeadMean if args.evidence_param == "mean" else EvidenceHead
+        evidence_model = wrap_readout(evidence_class(dim=dim, n_classes=args.n_classes), args, dim).to(device)
     started = time.time()
     evidence_model, evidence_val_nll = train_evidence(evidence_model, bundle, args, device)
     evidence_seconds = time.time() - started
