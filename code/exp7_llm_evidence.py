@@ -355,6 +355,8 @@ def main():
     parser.add_argument("--skill-rare", type=float, default=0.9)
     parser.add_argument("--skill-common", type=float, default=0.3)
     parser.add_argument("--rare-frac", type=float, default=0.3, help="把最稀有的这一比例类视为'稀有'")
+    parser.add_argument("--risk-coverage", action="store_true",
+                        help="报告风险-覆盖曲线（综述 Ch2 明确要求）：AURC 与固定覆盖率下的精度")
     parser.add_argument("--post-hoc-temp", action="store_true",
                         help="注入后做交叉拟合的温度缩放，报告缩放后的 ECE")
     parser.add_argument("--llm-mode", default="stub", choices=["stub", "real"],
@@ -515,6 +517,26 @@ def main():
         delta_value = after[key] - before[key]
         print(f"  {key:<12}{before[key]:>10.4f}{after[key]:>10.4f}{delta_value:>+10.4f}")
 
+    risk_report = None
+    if args.risk_coverage:
+        from metrics import accuracy_at_coverage, aurc
+        coverages = (0.5, 0.8, 0.9)
+        risk_report = {
+            "before": {"aurc": float(aurc(before["probs"], labels)),
+                       **{f"acc@{int(rate * 100)}": float(accuracy_at_coverage(before["probs"], labels, rate))
+                          for rate in coverages}},
+            "after": {"aurc": float(aurc(after["probs"], labels)),
+                      **{f"acc@{int(rate * 100)}": float(accuracy_at_coverage(after["probs"], labels, rate))
+                         for rate in coverages}},
+        }
+        print("\n  [风险-覆盖]（AURC 越小越好；acc@X% 是保留最自信 X% 样本时的精度）")
+        print(f"          {'指标':<12}{'注入前':>10}{'注入后':>10}{'Δ':>10}")
+        for key in ["aurc", "acc@50", "acc@80", "acc@90"]:
+            before_value = risk_report["before"][key]
+            after_value = risk_report["after"][key]
+            print(f"          {key:<12}{before_value:>10.4f}{after_value:>10.4f}"
+                  f"{after_value - before_value:>+10.4f}")
+
     post_hoc = None
     if args.post_hoc_temp:
         summary, temperatures = cross_fitted_temperature_ece(after["probs"], labels)
@@ -601,6 +623,7 @@ def main():
         "after": {k: v for k, v in after.items() if k != "probs"},
         "delta": {k: after[k] - before[k] for k in ("accuracy", "ece", "vacuity_mean", "conflict_mean")},
         "post_hoc_temperature": post_hoc,
+        "risk_coverage": risk_report,
         "called": int(mask.sum()),
         "injected_evidence": injected,
         "quartiles": layers,
