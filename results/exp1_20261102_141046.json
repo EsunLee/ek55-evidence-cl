@@ -1,0 +1,155 @@
+{
+  "script": "exp1.py",
+  "timestamp": "20261102_141046",
+  "seed": 0,
+  "readout": "lastk",
+  "evidence_param": "mean",
+  "lambda_conc": 0.1,
+  "args": {
+    "features": "/data/ldy/ek55_assets/ek55_verb_full_text.npz",
+    "synthetic": false,
+    "n_classes": 106,
+    "dim": 1024,
+    "n_train": 8000,
+    "n_val": 2000,
+    "n_test": 2000,
+    "epochs": 100,
+    "batch_size": 128,
+    "lr": 0.001,
+    "weight_decay": 0.01,
+    "head": "mlp",
+    "hidden": 256,
+    "dropout": 0.5,
+    "lambda_inf": 0.0,
+    "lambda_fit": 0.1,
+    "lambda_var": 0.0,
+    "lambda_conc": 0.1,
+    "var_topk": 0,
+    "soft_label_beta": 1.0,
+    "evidence_param": "mean",
+    "loss": "ce_evi",
+    "label_smoothing": 0.01,
+    "select_by": "nll",
+    "ce_weight": 0.0,
+    "sigma": 1.0,
+    "lambda_dist": 0.0,
+    "n_bins": 15,
+    "readout": "lastk",
+    "last_k": 5,
+    "seed": 0,
+    "export_alpha": "/data/ldy/ek55_assets/alpha_verb_mlp3_s0.npz",
+    "out_dir": null
+  },
+  "env": {
+    "timestamp": "2026-11-02 14:10:46",
+    "hostname": "amax",
+    "platform": "Linux-5.4.0-152-generic-x86_64-with-glibc2.28",
+    "python": "3.10.20",
+    "executable": "/data/conda_envs/insight_env/bin/python",
+    "code": {
+      "repo_root": "/data/ldy/ek55-evidence-cl",
+      "is_git_repo": true,
+      "commit": "954ef33",
+      "branch": "main",
+      "dirty": true
+    },
+    "torch": "2.5.1+cu118",
+    "cuda_available": true,
+    "cuda_version": "11.8",
+    "gpu_count": 3,
+    "gpu_names": [
+      "NVIDIA GeForce RTX 3090",
+      "NVIDIA GeForce RTX 3090",
+      "NVIDIA GeForce RTX 3090"
+    ],
+    "gpu_memory_gb": [
+      23.7,
+      23.7,
+      23.7
+    ],
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "sklearn": "1.7.0"
+  },
+  "data": {
+    "source": "/data/ldy/ek55_assets/ek55_verb_full_text.npz",
+    "sha1": "dbffe9aac237",
+    "n_train": 13857,
+    "n_test": 1486,
+    "dim": 1024,
+    "n_classes": 106
+  },
+  "baseline": {
+    "accuracy": 0.26446837146702556,
+    "ece_equal_width": 0.019254385114750746,
+    "ece_adaptive": 0.037393672267796545,
+    "brier": 0.8540820246746296,
+    "nll": 2.6543877445163107,
+    "auroc_confidence": 0.6125913458068811,
+    "auprc_confidence": 0.3886548754218328,
+    "aurc": 0.6455699280506407,
+    "accuracy_at_80pct_coverage": 0.28595458368376786,
+    "temperature": 1.0,
+    "ece_after_vector_scaling": 0.047528281871929125,
+    "ece_after_temperature": 0.019254385114750753
+  },
+  "evidence": {
+    "accuracy": 0.19044414535666218,
+    "ece_equal_width": 0.024173411923461622,
+    "ece_adaptive": 0.06234404859663838,
+    "brier": 0.8882976286343359,
+    "nll": 2.8555075174512563,
+    "auroc_confidence": 0.6588358315048657,
+    "auprc_confidence": 0.29193017555103595,
+    "aurc": 0.7326041851365812,
+    "accuracy_at_80pct_coverage": 0.21867115222876365,
+    "auroc_vacuity": 0.34802569547861795,
+    "auroc_conflict": 0.4439695813469859,
+    "mean_vacuity": 0.7015079146208587,
+    "mean_conflict": 0.9257256092506481,
+    "temperature": 0.9,
+    "ece_after_vector_scaling": 0.019539101161442318,
+    "ece_after_temperature": 0.03560493028124229
+  },
+  "matched_comparison": {
+    "target_accuracy": 0.26446837146702556,
+    "baseline_coverage": 0.020188425302826378,
+    "evidence_coverage": 0.02288021534320323,
+    "baseline_selective_ece": 0.17127697132453415,
+    "evidence_selective_ece": 0.03369286569549304
+  },
+  "low_evidence_bucket": {
+    "baseline": {
+      "bucket": 9,
+      "score_range": [
+        0.800969477805682,
+        0.8311949496345629
+      ],
+      "count": 149,
+      "accuracy": 0.12080536912751678,
+      "ece": 0.06851755382309226,
+      "mean_confidence": 0.18932292295060904
+    },
+    "evidence": {
+      "bucket": 9,
+      "score_range": [
+        0.7087771419991906,
+        0.7122518808490133
+      ],
+      "count": 149,
+      "accuracy": 0.38926174496644295,
+      "ece": 0.17867572217346417,
+      "mean_confidence": 0.21058602279297883
+    }
+  },
+  "decomposition": {},
+  "val_nll": {
+    "baseline": 2.556706999891798,
+    "evidence": 2.7016455675970734
+  },
+  "seconds": {
+    "baseline": 56.34895944595337,
+    "evidence": 68.15002155303955
+  },
+  "conclusion": "证据头精度掉超过 1 个百分点：先修训练，不解读可信度"
+}
