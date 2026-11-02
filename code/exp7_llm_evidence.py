@@ -128,7 +128,11 @@ def collect_llm_supports(args, mask, n_classes, probs=None):
     class_ids = meta["classes"]
     verb_names = load_class_names(args.verb_names)
     noun_names = load_class_names(args.noun_names)
-    candidate_names = [verb_names.get(int(cid), f"verb{cid}") for cid in class_ids]
+    if args.candidate_space == "noun":
+        name_table, prefix = noun_names, "noun"
+    else:
+        name_table, prefix = verb_names, "verb"
+    candidate_names = [name_table.get(int(cid), f"{prefix}{cid}") for cid in class_ids]
 
     past_verb = feats["past_verb_test"]
     past_noun = feats["past_noun_test"]
@@ -359,6 +363,8 @@ def main():
                         help="报告风险-覆盖曲线（综述 Ch2 明确要求）：AURC 与固定覆盖率下的精度")
     parser.add_argument("--post-hoc-temp", action="store_true",
                         help="注入后做交叉拟合的温度缩放，报告缩放后的 ECE")
+    parser.add_argument("--candidate-space", default="verb", choices=["verb", "noun"],
+                        help="候选表用动词名还是名词名（跨 noun 轴复现时需要 noun）")
     parser.add_argument("--llm-mode", default="stub", choices=["stub", "real"],
                         help="stub=模拟器（默认）；real=真调 LLM（需 LLM_API_KEY）")
     parser.add_argument("--verb-names", default="/data/datasets/EPIC-KITCHENS/annotations/EPIC_verb_classes.csv")
