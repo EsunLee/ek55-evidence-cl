@@ -104,6 +104,8 @@ def parse_args():
     parser.add_argument("--last-k", type=int, default=5, help="lastk 读出的 k")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--export-alpha", type=str, default=None)
+    parser.add_argument("--export-alpha-val", type=str, default=None,
+                        help="把验证集的 α/概率导出（用于在 val 上选注入强度，避免用测试集调参）")
     parser.add_argument("--out-dir", type=str, default=None)
     return parser.parse_args()
 
@@ -743,6 +745,15 @@ def main():
     evidence_report = credibility_report(evidence_probs, labels, args.n_bins, evidence_alpha=evidence_alpha)
 
     # --- 7.3 事后校准对照（温度缩放）---
+    if args.export_alpha_val:
+        evidence_val_alpha = predict_evidence(evidence_model, bundle["x_val"], device)
+        np.savez(args.export_alpha_val,
+                 alpha=np.asarray(evidence_val_alpha, dtype=np.float32),
+                 probs=np.asarray(predict_baseline(baseline_model, bundle["x_val"], device), dtype=np.float32),
+                 evidence_probs=np.asarray(dirichlet_mean(evidence_val_alpha), dtype=np.float32),
+                 y_val=np.asarray(bundle["y_val"], dtype=np.int64))
+        print(f'[导出] val 证据 α → {args.export_alpha_val}')
+
     baseline_val_probs = predict_baseline(baseline_model, bundle["x_val"], device)
     evidence_val_probs = dirichlet_mean(predict_evidence(evidence_model, bundle["x_val"], device))
     # 温度缩放是"事后校准"对照：每个方法各自在验证集上选温度，再在测试集上评 ECE

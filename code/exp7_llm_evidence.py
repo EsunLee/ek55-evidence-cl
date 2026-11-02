@@ -118,7 +118,7 @@ def cross_fitted_temperature_ece(probs, labels, folds=5, seed=0):
     return summary, temperatures
 
 
-def collect_llm_supports(args, mask, n_classes, probs=None):
+def collect_llm_supports(args, mask, n_classes, probs=None, split="test"):
     """对选中的样本调用真 LLM，返回 (support [N,K], confidence [N])。
 
     只对 mask=True 的样本花钱；其余行留空（后续只用到 mask 行）。
@@ -134,8 +134,8 @@ def collect_llm_supports(args, mask, n_classes, probs=None):
         name_table, prefix = verb_names, "verb"
     candidate_names = [name_table.get(int(cid), f"{prefix}{cid}") for cid in class_ids]
 
-    past_verb = feats["past_verb_test"]
-    past_noun = feats["past_noun_test"]
+    past_verb = feats[f"past_verb_{split}"]
+    past_noun = feats[f"past_noun_{split}"]
     support = np.zeros((len(mask), n_classes), dtype=np.float64)
     confidence = np.ones(len(mask), dtype=np.float64)
 
