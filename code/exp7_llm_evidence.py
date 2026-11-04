@@ -359,6 +359,8 @@ def main():
     parser.add_argument("--skill-rare", type=float, default=0.9)
     parser.add_argument("--skill-common", type=float, default=0.3)
     parser.add_argument("--rare-frac", type=float, default=0.3, help="把最稀有的这一比例类视为'稀有'")
+    parser.add_argument("--save-probs", type=str, default=None,
+                        help="导出逐样本概率与门控掩码（配对检验 / 分位模拟用）")
     parser.add_argument("--risk-coverage", action="store_true",
                         help="报告风险-覆盖曲线（综述 Ch2 明确要求）：AURC 与固定覆盖率下的精度")
     parser.add_argument("--post-hoc-temp", action="store_true",
@@ -522,6 +524,18 @@ def main():
     for key in ("accuracy", "ece", "vacuity_mean", "conflict_mean"):
         delta_value = after[key] - before[key]
         print(f"  {key:<12}{before[key]:>10.4f}{after[key]:>10.4f}{delta_value:>+10.4f}")
+
+    if args.save_probs:
+        vacuity_scores = scores.get("vacuity")
+        np.savez(args.save_probs,
+                 probs_before=np.asarray(before["probs"], dtype=np.float32),
+                 probs_after=np.asarray(after["probs"], dtype=np.float32),
+                 y=labels.astype(np.int64),
+                 mask=np.asarray(mask).astype(bool),
+                 vacuity=(np.asarray(vacuity_scores, dtype=np.float32)
+                          if vacuity_scores is not None else np.zeros(len(labels), dtype=np.float32)),
+                 support=np.asarray(support, dtype=np.float32))
+        print(f"[导出] 逐样本概率 → {args.save_probs}")
 
     risk_report = None
     if args.risk_coverage:
