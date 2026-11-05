@@ -102,6 +102,8 @@ def parse_args():
     parser.add_argument("--readout", type=str, default="mean", choices=["mean", "lastk", "attention"],
                         help="时序读出：mean=用已池化向量（旧行为）；lastk=最后 k 段均值；attention=注意力池化")
     parser.add_argument("--last-k", type=int, default=5, help="lastk 读出的 k")
+    parser.add_argument("--past-window", type=int, default=0,
+                        help="只取最后 k 段作观测（0=用全部 30 段）；用于按证据量做对照")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--export-alpha", type=str, default=None)
     parser.add_argument("--export-alpha-val", type=str, default=None,

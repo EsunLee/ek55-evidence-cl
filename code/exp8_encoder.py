@@ -45,6 +45,8 @@ def parse_args():
     parser.add_argument("--loss", default="ce", choices=["ce", "ce_evi"],
                         help="ce=纯交叉熵；ce_evi=额外鼓励浓度贴近 K（用于导出 vacuity）")
     parser.add_argument("--lambda-conc", type=float, default=0.1)
+    parser.add_argument("--past-window", type=int, default=0,
+                        help="只取最后 k 段作观测（0=用全部 30 段）；用于按证据量做对照")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--export-alpha", type=str, default=None)
     parser.add_argument("--export-alpha-val", type=str, default=None)
