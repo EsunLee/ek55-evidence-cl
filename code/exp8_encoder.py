@@ -127,6 +127,13 @@ def main():
     }
     dim = bundle["x_train"].shape[-1]
     n_classes = int(max(bundle["y_train"].max(), bundle["y_test"].max()) + 1)
+    # ===== 截取观测窗口（--past-window）：只保留最后 k 段 =====
+    if args.past_window > 0:
+        for key in ("x_train", "x_val", "x_test", "seq_train", "seq_val", "seq_test"):
+            if bundle.get(key) is not None and bundle[key].ndim == 3:
+                bundle[key] = bundle[key][:, -args.past_window :, :]
+        print(f"[窗口] 只取最后 {args.past_window} 段")
+
     print(f"[数据] 训练 {len(bundle['y_train'])} / 验证 {len(bundle['y_val'])} / "
           f"测试 {len(bundle['y_test'])}｜维度 {dim}｜类别 {n_classes}｜设备 {device}")
 

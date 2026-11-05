@@ -704,6 +704,13 @@ def main():
                 raise SystemExit(f"[错误] --readout {args.readout} 需要 x_seq_{split_name}，当前 npz 缺该字段")
             bundle[f"x_{split_name}"] = sequence
         print(f"[读出] {args.readout}：输入形状 {tuple(bundle['x_train'].shape)}")
+    # ===== 截取观测窗口（--past-window）：只保留最后 k 段 =====
+    if args.past_window > 0:
+        for key in ("x_train", "x_val", "x_test", "seq_train", "seq_val", "seq_test"):
+            if bundle.get(key) is not None and bundle[key].ndim == 3:
+                bundle[key] = bundle[key][:, -args.past_window :, :]
+        print(f"[窗口] 只取最后 {args.past_window} 段")
+
     print(f"[数据] 训练 {len(bundle['y_train'])} / 验证 {len(bundle['y_val'])} / 测试 {len(bundle['y_test'])}"
           f"，维度 {dim}，类别 {args.n_classes}，设备 {device}")
 
