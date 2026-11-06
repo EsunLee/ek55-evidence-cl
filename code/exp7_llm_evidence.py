@@ -134,6 +134,8 @@ def collect_llm_supports(args, mask, n_classes, probs=None, split="test"):
         name_table, prefix = verb_names, "verb"
     candidate_names = [name_table.get(int(cid), f"{prefix}{cid}") for cid in class_ids]
 
+    if getattr(args, "predicted_history", None):
+        feats = np.load(args.predicted_history, allow_pickle=True)
     past_verb = feats[f"past_verb_{split}"]
     past_noun = feats[f"past_noun_{split}"]
     support = np.zeros((len(mask), n_classes), dtype=np.float64)
@@ -365,6 +367,8 @@ def main():
                         help="报告风险-覆盖曲线（综述 Ch2 明确要求）：AURC 与固定覆盖率下的精度")
     parser.add_argument("--post-hoc-temp", action="store_true",
                         help="注入后做交叉拟合的温度缩放，报告缩放后的 ECE")
+    parser.add_argument("--predicted-history", default=None,
+                        help="用 exp10 产出的 npz 里的预测历史动作名替代标注真值（检验信息泄漏）")
     parser.add_argument("--candidate-space", default="verb", choices=["verb", "noun"],
                         help="候选表用动词名还是名词名（跨 noun 轴复现时需要 noun）")
     parser.add_argument("--llm-mode", default="stub", choices=["stub", "real"],
