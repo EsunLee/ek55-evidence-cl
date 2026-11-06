@@ -20,6 +20,87 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+
+class CausalTagger(nn.Module):
+    """因果逐段标注器：第 t 段的输出只依赖第 1..t 段特征。
+
+    为什么必须因果：第 t 段的动作名是"已发生"的信息，真实系统在 t 时刻只能看到 1..t。
+    用双向上下文或整段平均都会把未来信息带进来。
+    """
+
+    def __init__(self, dim, n_classes, hidden=256, layers=2, dropout=0.1):
+        super().__init__()
+        self.project = nn.Linear(in_features=dim, out_features=hidden)
+        self.position = nn.Parameter(torch.zeros(1, 30, hidden))
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden, nhead=4, dim_feedforward=hidden * 2,
+            dropout=dropout, batch_first=True, norm_first=True)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=layers)
+        self.classifier = nn.Linear(in_features=hidden, out_features=n_classes)
+
+    @staticmethod
+    def causal_mask(length, device):
+        """上三角为 -inf：位置 t 只能看 <= t。"""
+        mask = torch.triu(torch.ones(length, length, device=device), diagonal=1).bool()
+        return mask
+
+    def forward(self, sequence):
+        hidden = self.project(sequence) + self.position[:, : sequence.shape[1]]
+        mask = self.causal_mask(sequence.shape[1], sequence.device)
+        hidden = self.encoder(hidden, mask=mask)
+        return self.classifier(hidden)
+
+
+def train_causal_taggers(args, device, data):
+    """训练因果逐段标注器（verb/noun 各一个），返回 test 上的预测。"""
+    import numpy as _np
+    seq_train = data["x_seq_train"].astype(_np.float32)
+    seq_val = data["x_seq_val"].astype(_np.float32)
+    seq_test = data["x_seq_test"].astype(_np.float32)
+    v_train = data["past_verb_train"].astype(_np.int64)
+    v_val = data["past_verb_val"].astype(_np.int64)
+    n_train = data["past_noun_train"].astype(_np.int64)
+    n_val = data["past_noun_val"].astype(_np.int64)
+    n_verb = int(max(v_train.max(), data["past_verb_test"].max()) + 1)
+    n_noun = int(max(n_train.max(), data["past_noun_test"].max()) + 1)
+
+    results = {}
+    for name, y_train, y_val, n_classes in (("verb", v_train, v_val, n_verb),
+                                            ("noun", n_train, n_val, n_noun)):
+        model = CausalTagger(seq_train.shape[-1], n_classes).to(device)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-2)
+        best_state, best_val = None, -1.0
+        for epoch in range(args.epochs):
+            model.train()
+            order = torch.randperm(len(seq_train))
+            for start in range(0, len(order), max(args.batch_size // 8, 8)):
+                index = order[start : start + max(args.batch_size // 8, 8)]
+                batch_x = torch.from_numpy(seq_train[index.numpy()]).to(device)
+                batch_y = torch.from_numpy(y_train[index.numpy()]).to(device)
+                optimizer.zero_grad()
+                logits = model(batch_x)
+                loss = F.cross_entropy(logits.reshape(-1, n_classes), batch_y.reshape(-1))
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+            model.eval()
+            with torch.no_grad():
+                val_logits = model(torch.from_numpy(seq_val).to(device))
+                accuracy = (val_logits.argmax(-1).cpu().numpy() == y_val).mean()
+            if accuracy > best_val:
+                best_val = accuracy
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            if (epoch + 1) % 5 == 0:
+                print(f"[causal {name}] epoch {epoch + 1} 验证逐段准确率 {accuracy:.4f}")
+        model.load_state_dict(best_state)
+        model.eval()
+        with torch.no_grad():
+            test_logits = model(torch.from_numpy(seq_test).to(device))
+            results[name] = test_logits.argmax(-1).cpu().numpy()
+        print(f"[causal {name}] 验证集最优逐段准确率 {best_val:.4f}")
+    return results
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="逐段动作识别器 → 预测的历史动作名")
     parser.add_argument("--features", required=True)
@@ -27,6 +108,8 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--temporal", action="store_true",
+                        help="因果时序：第 t 段只用第 1..t 段特征（严格因果，不偷看未来）")
     parser.add_argument("--out", required=True)
     return parser.parse_args()
 
@@ -82,6 +165,19 @@ def main():
                        == torch.from_numpy(v_val if name == "verb" else n_val)).float().mean().item()
         print(f"[{name}] 验证集逐段准确率 {val_acc:.4f}")
         return model, val_acc
+
+    if args.temporal:
+        predictions = train_causal_taggers(args, device, data)
+        pred_verb = predictions["verb"]
+        pred_noun = predictions["noun"]
+        seq_acc = (pred_verb == data["past_verb_test"]).mean()
+        print(f"[因果序列] 30 段整体逐段命中率 {seq_acc:.4f}")
+        payload = {key: data[key] for key in data.files}
+        payload["past_verb_test"] = pred_verb
+        payload["past_noun_test"] = pred_noun
+        np.savez(args.out, **payload)
+        print(f"[落盘] {args.out}（因果预测的历史动作名）")
+        return 0
 
     verb_model, verb_acc = train_head(x_train, v_train, n_verb, "verb")
     noun_model, noun_acc = train_head(x_train, n_train, n_noun, "noun")
