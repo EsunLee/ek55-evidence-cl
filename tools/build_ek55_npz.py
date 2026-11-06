@@ -114,7 +114,7 @@ def perspective_gap_violated(past_segments, target, gap_frames):
 
 
 def build_windows(ordered_segments, past=30, future=8, has_feature=None,
-                  anticipation_gap=0.0):
+                  anticipation_gap=0.0, require_future_features=False):
     """对每个目标段 i 组装窗口。
 
     定义（写清楚，避免口径漂移）：
@@ -140,7 +140,8 @@ def build_windows(ordered_segments, past=30, future=8, has_feature=None,
         past_segments = ordered_segments[index - past:index]
         future_segments = ordered_segments[index:index + future]
         window = past_segments + future_segments
-        if not all(has_feature(segment) for segment in window):
+        needed = window if require_future_features else past_segments
+        if not all(has_feature(segment) for segment in needed):
             stats["missing_feature"] += 1
             continue
         # 时间合规：全部 30 个观测段都必须结束于 target.start - gap 之前
@@ -152,6 +153,10 @@ def build_windows(ordered_segments, past=30, future=8, has_feature=None,
             "past": past_segments,
             "future": future_segments,
             "target": target,
+            # 逐样本时间审计（落盘后仍可独立核验）
+            "target_start": int(target["start_frame"]),
+            "cutoff": float(target["start_frame"] - gap_frames),
+            "max_past_stop": int(max(seg["stop_frame"] for seg in past_segments)),
         })
         stats["kept"] += 1
     return samples, stats
@@ -270,6 +275,13 @@ def collect_split(segments, features_dir, past, future, workers, limit=0,
         "uids": [sample["target"]["uid"] for sample in all_samples],
         "past_verb": past_verb,
         "past_noun": past_noun,
+        # 逐样本时间审计：target_start / cutoff / max_past_stop（帧号）
+        "audit_target_start": np.array([sample["target_start"] for sample in all_samples],
+                                       dtype=np.int64),
+        "audit_cutoff": np.array([sample["cutoff"] for sample in all_samples],
+                                 dtype=np.float64),
+        "audit_max_past_stop": np.array([sample["max_past_stop"] for sample in all_samples],
+                                        dtype=np.int64),
     }
 
 
@@ -282,7 +294,7 @@ def main():
     parser.add_argument("--with-text", action="store_true",
                         help="额外保存 past_verb/past_noun（过去窗口动作 id，供 LLM prompt 用；约 1 MB）")
     parser.add_argument("--out", required=True)
-    parser.add_argument("--anticipation-gap", type=float, default=0.0,
+    parser.add_argument("--anticipation-gap", type=float, default=1.0,
                         help="观测段必须在目标动作开始前至少多少秒结束（官方 EK55 要求 1.0）")
     parser.add_argument("--past", type=int, default=30)
     parser.add_argument("--future", type=int, default=8)
@@ -341,6 +353,16 @@ def main():
                               args.anticipation_gap) if test_segments else None
 
     print("[4/4] 建立连续类索引并落盘")
+    # ===== 验收断言：每条保留样本都必须满足时间合规 =====
+    for split_name, split_data in (("train", train_data), ("val", val_data),
+                                   ("test", test_data)):
+        if split_data is None:
+            continue
+        violated = (split_data["audit_max_past_stop"] > split_data["audit_cutoff"]).sum()
+        print(f"    [审计] {split_name}: {len(split_data['audit_cutoff'])} 条，"
+              f"违规 {int(violated)} 条"
+              f"（gap={args.anticipation_gap}s）")
+        assert violated == 0, f"{split_name} 存在 {violated} 条时间违规样本，拒绝落盘"
     all_pairs = [tuple(pair) for pair in train_data["pairs"]]
     if val_data is not None:
         all_pairs += [tuple(pair) for pair in val_data["pairs"]]

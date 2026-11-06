@@ -188,12 +188,12 @@ def main():
     noun_model, noun_acc = train_head(x_train, n_train, n_noun, "noun")
 
     # 对 test 的 30 段逐段预测
-    def predict(model):
+    def predict(model, seq=x_test):
         model.eval()
         outputs = []
         with torch.no_grad():
             for start in range(0, len(x_test), 4096):
-                batch = torch.from_numpy(x_test[start : start + 4096]).to(device)
+                batch = torch.from_numpy(seq[start : start + 4096]).to(device)
                 outputs.append(model(batch).argmax(1).cpu())
         return torch.cat(outputs).numpy().reshape(n_samples, window)
 
@@ -202,6 +202,8 @@ def main():
     seq_acc = (pred_verb == data["past_verb_test"]).mean()
     print(f"[序列] 30 段整体逐段命中率 {seq_acc:.4f}")
 
+    pred_verb_val = predict(verb_model, x_val.reshape(-1, window, x_val.shape[-1])
+                            if x_val.ndim == 2 else None) if False else None
     payload = {key: data[key] for key in data.files}
     payload["past_verb_test"] = pred_verb
     payload["past_noun_test"] = pred_noun
