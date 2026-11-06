@@ -97,6 +97,8 @@ def train_causal_taggers(args, device, data):
         with torch.no_grad():
             test_logits = model(torch.from_numpy(seq_test).to(device))
             results[name] = test_logits.argmax(-1).cpu().numpy()
+            val_logits = model(torch.from_numpy(seq_val).to(device))
+            results[name + "_val"] = val_logits.argmax(-1).cpu().numpy()
         print(f"[causal {name}] 验证集最优逐段准确率 {best_val:.4f}")
     return results
 
@@ -175,6 +177,9 @@ def main():
         payload = {key: data[key] for key in data.files}
         payload["past_verb_test"] = pred_verb
         payload["past_noun_test"] = pred_noun
+        # 关键：val 也必须用同一种（预测的）历史，否则强度选择与最终评估条件不一致
+        payload["past_verb_val"] = predictions["verb_val"]
+        payload["past_noun_val"] = predictions["noun_val"]
         np.savez(args.out, **payload)
         print(f"[落盘] {args.out}（因果预测的历史动作名）")
         return 0
