@@ -114,7 +114,8 @@ def perspective_gap_violated(past_segments, target, gap_frames):
 
 
 def build_windows(ordered_segments, past=30, future=8, has_feature=None,
-                  anticipation_gap=0.0, require_future_features=False):
+                  anticipation_gap=0.0, require_future_features=False,
+                  past_only=False):
     """对每个目标段 i 组装窗口。
 
     定义（写清楚，避免口径漂移）：
@@ -134,7 +135,8 @@ def build_windows(ordered_segments, past=30, future=8, has_feature=None,
         if index < past:
             stats["too_early"] += 1
             continue
-        if index + future > len(ordered_segments):
+        # past_only 时不要求"目标之后还存在 future 段"：主实验只预测下一动作
+        if (not past_only) and index + future > len(ordered_segments):
             stats["too_late_future"] += 1
             continue
         past_segments = ordered_segments[index - past:index]
@@ -206,7 +208,7 @@ def feature_path(features_dir, segment):
 # ===== 4. 主流程 =====
 
 def collect_split(segments, features_dir, past, future, workers, limit=0,
-                  anticipation_gap=0.0):
+                  anticipation_gap=0.0, past_only=False):
     """处理一个划分：组窗口 → 多线程读特征 → 返回数组与统计。"""
     grouped = group_by_video(segments)
     video_ids = sorted(grouped.keys())
@@ -222,7 +224,8 @@ def collect_split(segments, features_dir, past, future, workers, limit=0,
     for video_id in video_ids:
         samples, stats = build_windows(grouped[video_id], past=past, future=future,
                                        has_feature=has_feature,
-                                       anticipation_gap=anticipation_gap)
+                                       anticipation_gap=anticipation_gap,
+                                       past_only=past_only)
         for key in stats_total:
             stats_total[key] += stats[key]
         all_samples.extend(samples)
@@ -242,10 +245,12 @@ def collect_split(segments, features_dir, past, future, workers, limit=0,
         for segment in sample["past"]:
             pooled, _ = pool_feature_file(feature_path(features_dir, segment))
             past_vectors.append(pooled)
-        for segment in sample["future"]:
-            pooled, _ = pool_feature_file(feature_path(features_dir, segment))
-            future_vectors.append(pooled)
-        return index, np.stack(past_vectors), np.stack(future_vectors)
+        if not past_only:
+            for segment in sample["future"]:
+                pooled, _ = pool_feature_file(feature_path(features_dir, segment))
+                future_vectors.append(pooled)
+        future_array = np.stack(future_vectors) if future_vectors else None
+        return index, np.stack(past_vectors), future_array
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for done, (index, past_array, future_array) in enumerate(
@@ -255,7 +260,8 @@ def collect_split(segments, features_dir, past, future, workers, limit=0,
                 print(f"    已读取 {done}/{len(all_samples)}（{time.time() - started:.0f}s）")
 
     past_stack = np.stack([item[0] for item in results]).astype(np.float16)
-    future_stack = np.stack([item[1] for item in results]).astype(np.float16)
+    future_stack = (np.stack([item[1] for item in results]).astype(np.float16)
+                    if results and results[0][1] is not None else None)
     # 注意：这里返回 (verb, noun) **对**，不拼成大整数——否则 verb*1000+noun 会把类空间
     # 撑到 12 万量级，线性分类头会直接爆掉。连续索引在 main 里统一建立。
     pairs = np.array([[sample["target"]["verb_class"], sample["target"]["noun_class"]]
@@ -269,7 +275,7 @@ def collect_split(segments, features_dir, past, future, workers, limit=0,
     return {
         "x": pooled,
         "x_seq": past_stack,
-        "x_future": future_stack,
+        **({"x_future": future_stack} if future_stack is not None else {}),
         "pairs": pairs,
         "stats": stats_total,
         "uids": [sample["target"]["uid"] for sample in all_samples],
@@ -296,6 +302,8 @@ def main():
     parser.add_argument("--out", required=True)
     parser.add_argument("--anticipation-gap", type=float, default=1.0,
                         help="观测段必须在目标动作开始前至少多少秒结束（官方 EK55 要求 1.0）")
+    parser.add_argument("--past-only", action="store_true",
+                        help="只读过去特征、不要求未来段存在（主实验用）")
     parser.add_argument("--past", type=int, default=30)
     parser.add_argument("--future", type=int, default=8)
     parser.add_argument("--video-limit", type=int, default=0, help="每个划分只取前 N 个视频（试跑用）")
@@ -343,14 +351,14 @@ def main():
 
     print("[2/4] 处理 train 划分")
     train_data = collect_split(train_segments, args.features_train, args.past, args.future,
-                               args.workers, args.video_limit, args.anticipation_gap)
+                               args.workers, args.video_limit, args.anticipation_gap, args.past_only)
     print("[3/4] 处理 val（早停用）与 test（留出）划分")
     val_data = collect_split(val_segments, args.features_train, args.past, args.future,
                              args.workers, args.video_limit,
-                             args.anticipation_gap) if val_segments else None
+                             args.anticipation_gap, args.past_only) if val_segments else None
     test_data = collect_split(test_segments, args.features_val, args.past, args.future,
                               args.workers, args.video_limit,
-                              args.anticipation_gap) if test_segments else None
+                              args.anticipation_gap, args.past_only) if test_segments else None
 
     print("[4/4] 建立连续类索引并落盘")
     # ===== 验收断言：每条保留样本都必须满足时间合规 =====
@@ -436,11 +444,26 @@ def main():
         "test_samples": int(len(test_labels)) if test_labels is not None else 0,
         "split_rule": "train/val 取自 features/train 的视频（按名字排序每 1/val_ratio 取 1 进 val）；"
                       "test 用 features/val 的视频完全留出",
+        "anticipation_gap_seconds": float(args.anticipation_gap),
+        "anticipation_gap_frames": float(args.anticipation_gap) * 30.0,
+        "past_only": bool(args.past_only),
         "train_window_stats": train_data["stats"],
         "val_window_stats": val_data["stats"] if val_data is not None else None,
         "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     payload["meta"] = np.array(json.dumps(meta, ensure_ascii=False))
+
+    # 逐样本时间审计：可脱离本脚本独立复核"每条输入都在 cutoff 前结束"
+    def _audit(split_data, suffix):
+        if split_data is None:
+            return
+        payload[f"audit_target_start{suffix}"] = split_data["audit_target_start"]
+        payload[f"audit_cutoff{suffix}"] = split_data["audit_cutoff"]
+        payload[f"audit_max_past_stop{suffix}"] = split_data["audit_max_past_stop"]
+
+    _audit(train_data, "")
+    _audit(val_data, "_val")
+    _audit(test_data, "_test")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     np.savez_compressed(args.out, **payload)
     size_gb = os.path.getsize(args.out) / 1024 ** 3

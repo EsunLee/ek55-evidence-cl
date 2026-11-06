@@ -184,6 +184,10 @@ def main():
         print(f"[落盘] {args.out}（因果预测的历史动作名）")
         return 0
 
+    raise SystemExit(
+        "[错误] 非因果分支不导出 val 预测历史，会造成 val/test 输入不一致；\n"
+        "       请加 --temporal 使用因果逐段标注器（推荐），或自行保证 val 一致性后再改代码。")
+
     verb_model, verb_acc = train_head(x_train, v_train, n_verb, "verb")
     noun_model, noun_acc = train_head(x_train, n_train, n_noun, "noun")
 
