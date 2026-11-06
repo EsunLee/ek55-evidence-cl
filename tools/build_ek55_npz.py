@@ -106,7 +106,15 @@ def load_excluded_videos(manifest_path):
 
 # ===== 2. 组窗口（纯逻辑，可在无 torch 环境下单测）=====
 
-def build_windows(ordered_segments, past=30, future=8, has_feature=None):
+def perspective_gap_violated(past_segments, target, gap_frames):
+    """任一观测段在 cutoff 之后结束 → 违规。返回 True 表示违规。"""
+    cutoff = target["start_frame"] - gap_frames
+    latest_stop = max(segment["stop_frame"] for segment in past_segments)
+    return latest_stop > cutoff
+
+
+def build_windows(ordered_segments, past=30, future=8, has_feature=None,
+                  anticipation_gap=0.0):
     """对每个目标段 i 组装窗口。
 
     定义（写清楚，避免口径漂移）：
@@ -116,7 +124,10 @@ def build_windows(ordered_segments, past=30, future=8, has_feature=None):
     返回 (样本列表, 统计)。has_feature 为 None 时视为全部可用。
     """
     samples = []
-    stats = {"too_early": 0, "missing_feature": 0, "too_late_future": 0, "kept": 0}
+    stats = {"too_early": 0, "missing_feature": 0, "too_late_future": 0, "kept": 0,
+             "too_close": 0}
+    # 秒 → 帧：用 EPIC 官方 30fps 换算（标注帧号即 30fps 下的帧序）
+    gap_frames = anticipation_gap * 30.0
     has_feature = has_feature or (lambda segment: True)
 
     for index, target in enumerate(ordered_segments):
@@ -131,6 +142,11 @@ def build_windows(ordered_segments, past=30, future=8, has_feature=None):
         window = past_segments + future_segments
         if not all(has_feature(segment) for segment in window):
             stats["missing_feature"] += 1
+            continue
+        # 时间合规：全部 30 个观测段都必须结束于 target.start - gap 之前
+        # （只查"紧邻上一段"不够：标注段之间可能重叠，更早的段也可能结束得更晚）
+        if perspective_gap_violated(past_segments, target, gap_frames):
+            stats["too_close"] += 1
             continue
         samples.append({
             "past": past_segments,
@@ -184,7 +200,8 @@ def feature_path(features_dir, segment):
 
 # ===== 4. 主流程 =====
 
-def collect_split(segments, features_dir, past, future, workers, limit=0):
+def collect_split(segments, features_dir, past, future, workers, limit=0,
+                  anticipation_gap=0.0):
     """处理一个划分：组窗口 → 多线程读特征 → 返回数组与统计。"""
     grouped = group_by_video(segments)
     video_ids = sorted(grouped.keys())
@@ -195,16 +212,19 @@ def collect_split(segments, features_dir, past, future, workers, limit=0):
         return os.path.isfile(feature_path(features_dir, segment))
 
     all_samples = []
-    stats_total = {"too_early": 0, "missing_feature": 0, "too_late_future": 0, "kept": 0}
+    stats_total = {"too_early": 0, "missing_feature": 0, "too_late_future": 0, "kept": 0,
+                   "too_close": 0}
     for video_id in video_ids:
         samples, stats = build_windows(grouped[video_id], past=past, future=future,
-                                       has_feature=has_feature)
+                                       has_feature=has_feature,
+                                       anticipation_gap=anticipation_gap)
         for key in stats_total:
             stats_total[key] += stats[key]
         all_samples.extend(samples)
 
     print(f"    组窗口：保留 {stats_total['kept']}，"
           f"开头不足 {stats_total['too_early']}，缺特征 {stats_total['missing_feature']}，"
+          f"间隔不足 {stats_total['too_close']}，"
           f"结尾不足 {stats_total['too_late_future']}")
 
     started = time.time()
@@ -262,6 +282,8 @@ def main():
     parser.add_argument("--with-text", action="store_true",
                         help="额外保存 past_verb/past_noun（过去窗口动作 id，供 LLM prompt 用；约 1 MB）")
     parser.add_argument("--out", required=True)
+    parser.add_argument("--anticipation-gap", type=float, default=0.0,
+                        help="观测段必须在目标动作开始前至少多少秒结束（官方 EK55 要求 1.0）")
     parser.add_argument("--past", type=int, default=30)
     parser.add_argument("--future", type=int, default=8)
     parser.add_argument("--video-limit", type=int, default=0, help="每个划分只取前 N 个视频（试跑用）")
@@ -309,12 +331,14 @@ def main():
 
     print("[2/4] 处理 train 划分")
     train_data = collect_split(train_segments, args.features_train, args.past, args.future,
-                               args.workers, args.video_limit)
+                               args.workers, args.video_limit, args.anticipation_gap)
     print("[3/4] 处理 val（早停用）与 test（留出）划分")
     val_data = collect_split(val_segments, args.features_train, args.past, args.future,
-                             args.workers, args.video_limit) if val_segments else None
+                             args.workers, args.video_limit,
+                             args.anticipation_gap) if val_segments else None
     test_data = collect_split(test_segments, args.features_val, args.past, args.future,
-                              args.workers, args.video_limit) if test_segments else None
+                              args.workers, args.video_limit,
+                              args.anticipation_gap) if test_segments else None
 
     print("[4/4] 建立连续类索引并落盘")
     all_pairs = [tuple(pair) for pair in train_data["pairs"]]
