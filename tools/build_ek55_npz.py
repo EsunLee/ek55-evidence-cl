@@ -398,27 +398,28 @@ def main():
     payload = {
         "x_train": train_data["x"],
         "x_seq_train": train_data["x_seq"],
-        "x_future_train": train_data["x_future"],
         "y_train": train_labels,
         **(({"past_verb_train": train_data["past_verb"],
               "past_noun_train": train_data["past_noun"],
               "uids_train": np.array(train_data["uids"])}) if (args.with_text and train_data is not None) else {}),
     }
+    if "x_future" in train_data:
+        payload["x_future_train"] = train_data["x_future"]
     if val_data is not None:
         payload.update({
             "x_val": val_data["x"],
             "x_seq_val": val_data["x_seq"],
-            "x_future_val": val_data["x_future"],
             "y_val": val_labels,
         **(({"past_verb_val": val_data["past_verb"],
               "past_noun_val": val_data["past_noun"],
               "uids_val": np.array(val_data["uids"])}) if (args.with_text and val_data is not None) else {}),
         })
+    if val_data is not None and "x_future" in val_data:
+        payload["x_future_val"] = val_data["x_future"]
     if test_data is not None:
         payload.update({
             "x_test": test_data["x"],
             "x_seq_test": test_data["x_seq"],
-            "x_future_test": test_data["x_future"],
             "y_test": test_labels,
         **(({"past_verb_test": test_data["past_verb"],
               "past_noun_test": test_data["past_noun"],
@@ -449,8 +450,11 @@ def main():
         "past_only": bool(args.past_only),
         "train_window_stats": train_data["stats"],
         "val_window_stats": val_data["stats"] if val_data is not None else None,
+        "test_window_stats": test_data["stats"] if test_data is not None else None,
         "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
+    if test_data is not None and "x_future" in test_data:
+        payload["x_future_test"] = test_data["x_future"]
     payload["meta"] = np.array(json.dumps(meta, ensure_ascii=False))
 
     # 逐样本时间审计：可脱离本脚本独立复核"每条输入都在 cutoff 前结束"
