@@ -100,7 +100,40 @@ def train_causal_taggers(args, device, data):
             val_logits = model(torch.from_numpy(seq_val).to(device))
             results[name + "_val"] = val_logits.argmax(-1).cpu().numpy()
         print(f"[causal {name}] 验证集最优逐段准确率 {best_val:.4f}")
-    return results
+        last_model = model
+    return results, last_model
+
+
+def verify_causal(model, seq_test, device, n_probe=8):
+    """因果性自检：篡改第 t 段之后的特征，第 t 段及之前的输出必须完全不变。
+
+    这是检验上三角 mask 是否真正生效的唯一可靠办法；
+    "因果版准确率高"不能作为掩码失效的证据（过去的上下文确实能提高准确率）。
+    """
+    model.eval()
+    probe = torch.from_numpy(seq_test[:n_probe]).to(device)
+    with torch.no_grad():
+        base = model(probe)
+        corrupted = probe.clone()
+        # 只破坏后半段（位置 >= 15），检查前半段（< 15）输出是否逐元素一致
+        corrupted[:, 15:, :] = torch.randn_like(corrupted[:, 15:, :])
+        after = model(corrupted)
+    diff = (base[:, :15] - after[:, :15]).abs().max().item()
+    changed = (base[:, 15:] - after[:, 15:]).abs().max().item()
+    print(f"[因果自检] 前半段最大差异 {diff:.3e}（应为 0）｜后半段最大差异 {changed:.3e}（应 > 0）")
+    return diff
+
+
+def report_tagging(pred_verb, pred_noun, true_verb, true_noun, split_name):
+    """同时报告 verb / noun / verb–noun 联合的逐段命中率。"""
+    verb_acc = (pred_verb == true_verb).mean()
+    noun_acc = (pred_noun == true_noun).mean()
+    joint_acc = ((pred_verb == true_verb) & (pred_noun == true_noun)).mean()
+    print(f"[{split_name}] verb {verb_acc:.4f}｜noun {noun_acc:.4f}｜"
+          f"verb–noun 联合 {joint_acc:.4f}｜形状 {pred_verb.shape}｜"
+          f"verb 范围 [{pred_verb.min()}, {pred_verb.max()}]｜"
+          f"noun 范围 [{pred_noun.min()}, {pred_noun.max()}]")
+    return verb_acc, noun_acc, joint_acc
 
 
 def parse_args():
@@ -169,11 +202,19 @@ def main():
         return model, val_acc
 
     if args.temporal:
-        predictions = train_causal_taggers(args, device, data)
+        predictions, model_for_check = train_causal_taggers(args, device, data)
+        seq_test_for_check = data["x_seq_test"].astype(np.float32)
         pred_verb = predictions["verb"]
         pred_noun = predictions["noun"]
-        seq_acc = (pred_verb == data["past_verb_test"]).mean()
-        print(f"[因果序列] 30 段整体逐段命中率 {seq_acc:.4f}")
+        # 因果性与形状自检（不通过就不落盘）
+        probe_ok = verify_causal(model_for_check, seq_test_for_check, device)
+        assert probe_ok < 1e-6, "因果 mask 未生效：修改未来特征影响了历史输出"
+        assert pred_verb.shape == data["past_verb_test"].shape, "test 预测形状不一致"
+        assert pred_verb.max() < n_verb and pred_noun.max() < n_noun, "预测类别越界"
+        report_tagging(pred_verb, pred_noun, data["past_verb_test"],
+                       data["past_noun_test"], "test")
+        report_tagging(predictions["verb_val"], predictions["noun_val"],
+                       data["past_verb_val"], data["past_noun_val"], "val")
         payload = {key: data[key] for key in data.files}
         payload["past_verb_test"] = pred_verb
         payload["past_noun_test"] = pred_noun
