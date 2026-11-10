@@ -35,6 +35,8 @@ def main():
     parser.add_argument("--llm-rerank-topk", type=int, default=3)
     parser.add_argument("--llm-cache", default="/data/ldy/ek55_assets/llm_cache")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--save-argmax", default=None,
+                        help="保存每个强度下 val 的逐样本 argmax（验证决策是否饱和）")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
 
@@ -76,11 +78,13 @@ def main():
     support, confidence, queried = collect_llm_supports(
         llm_args, mask, n_classes, probs=probs, split="val")
 
+    argmax_store = {}
     print(f"\n{'strength':<10}{'val Δacc':>10}")
     rows = []
     for strength in [float(item) for item in args.grid.split(",")]:
         alpha1, _ = inject_prior(alpha0, support, mask, args.prior_mode, strength)
         after = metrics_of(alpha1, labels)
+        argmax_store[str(strength)] = np.asarray(after["probs"]).argmax(axis=1).astype(np.int16)
         delta = after["accuracy"] - before["accuracy"]
         rows.append((strength, delta))
         print(f"{strength:<10}{delta:>+10.4f}")
@@ -90,6 +94,15 @@ def main():
     if best_strength == max(item[0] for item in rows):
         print("       ⚠️ 最优点在网格上界，建议扩大 --grid")
     print(f"       测试集请固定用：--strength {best_strength}")
+
+    if args.save_argmax and argmax_store:
+        np.savez(args.save_argmax, **argmax_store, y=labels.astype(np.int64))
+        keys = sorted(argmax_store, key=float)
+        base = argmax_store[keys[0]]
+        print("\n[饱和检查] 各强度 argmax 与最小强度的逐样本差异：")
+        for key in keys:
+            diff = int((argmax_store[key] != base).sum())
+            print(f"  γ={key:<5} 与 γ={keys[0]} 不同样本数 = {diff}")
 
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
