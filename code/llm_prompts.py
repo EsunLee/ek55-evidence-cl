@@ -41,13 +41,15 @@ def load_class_names(csv_path):
     return names
 
 
-def build_prompt(past_verb_ids, past_noun_ids, candidate_names, verb_names, noun_names):
+def build_prompt(past_verb_ids, past_noun_ids, candidate_names, verb_names, noun_names,
+                 include_noun=True):
     """拼一条 prompt。past_* 是长度 30 的 id 序列（旧→新），candidate_names 是候选动作名。"""
     lines = ["You are reviewing a cooking video. Recent actions, oldest to newest:"]
     for index, (verb_id, noun_id) in enumerate(zip(past_verb_ids, past_noun_ids), start=1):
         verb = verb_names.get(int(verb_id), f"verb{verb_id}")
         noun = noun_names.get(int(noun_id), f"noun{noun_id}")
-        lines.append(f"{index}. {verb} {noun}")
+        # include_noun=False 时只给动词序列（消融：排除预测名词的噪声）
+        lines.append(f"{index}. {verb} {noun}" if include_noun else f"{index}. {verb}")
 
     lines.append("")
     lines.append("The next action is one of these candidates:")
