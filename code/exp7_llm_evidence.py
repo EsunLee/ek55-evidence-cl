@@ -160,13 +160,13 @@ def collect_llm_supports(args, mask, n_classes, probs=None, split="test"):
             local_names = [candidate_names[int(c)] for c in local]
             prompt = build_prompt(past_verb[index], past_noun[index], local_names,
                                   verb_names, noun_names,
-                                   include_noun=(args.history_format == "verb+noun"))
+                                   include_noun=(getattr(args, "history_format", "verb+noun") == "verb+noun"))
         else:
             local = np.arange(n_classes)
             local_names = candidate_names
             prompt = build_prompt(past_verb[index], past_noun[index], candidate_names,
                                   verb_names, noun_names,
-                                   include_noun=(args.history_format == "verb+noun"))
+                                   include_noun=(getattr(args, "history_format", "verb+noun") == "verb+noun"))
         call_started = _time.time()
         text = llm_ask(prompt, cache_dir=args.llm_cache)
         elapsed = _time.time() - call_started
