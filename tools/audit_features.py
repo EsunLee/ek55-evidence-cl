@@ -44,6 +44,7 @@ def main():
     sample = random.sample(rows, min(args.n, len(rows)))
 
     shapes, norms, finite, uniq = [], [], [], []
+    bad_files = []
     dist_sim = defaultdict(list)     # 索引距离 → 相似度
     per_pos_norm = []
 
@@ -57,7 +58,12 @@ def main():
         if x.ndim != 3:
             continue
         frames, tokens, dim = x.shape
-        finite.append(np.isfinite(x).mean())
+        finite_ratio = float(np.isfinite(x).mean())
+        finite.append(finite_ratio)
+        if finite_ratio < 1.0:
+            # 不做静默清洗：记录文件，并从后续统计中剔除
+            bad_files.append((f"{row['video_id']}_{row['uid']}.pt", finite_ratio))
+            continue
         norms.append(np.linalg.norm(x, axis=2).mean())
         per_pos_norm.append(np.linalg.norm(x, axis=2).mean(axis=1))
         frame = x[0]
@@ -83,6 +89,13 @@ def main():
     print(f"  抽样文件 {len(shapes)}｜frames {sorted({int(s[0]) for s in shapes})}"
           f"｜tokens {sorted({int(s[1]) for s in shapes})}"
           f"｜dim {sorted({int(s[2]) for s in shapes})}")
+    if bad_files:
+        print(f"  ⚠️ 含非有限值的文件 {len(bad_files)}/{len(shapes)}"
+              f"（比例 {len(bad_files)/len(shapes):.1%}），已从统计中剔除、未做清洗：")
+        for name, ratio in bad_files[:5]:
+            print(f"      {name}  有限值 {ratio:.4f}")
+    else:
+        print("  非有限值：未发现（全部文件 finite=1.0）")
     print(f"  有限值比例 {np.mean(finite):.4f}｜向量 L2 范数 {np.mean(norms):.3f}"
           f"（范围 {np.min(norms):.3f}–{np.max(norms):.3f}）")
     print(f"  单帧内去重切片比例 {np.mean(uniq):.3f}（1.0=无重复 token）")
