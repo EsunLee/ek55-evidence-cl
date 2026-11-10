@@ -1,0 +1,31 @@
+{
+  "report": {
+    "accuracy": 0.297442799461642,
+    "ece_equal_width": 0.08919414009484618,
+    "ece_adaptive": 0.0918686566593249,
+    "brier": 0.8457456627101377,
+    "nll": 2.6115979181894455,
+    "aurc": 0.64629563387685,
+    "accuracy_at_80pct_coverage": 0.3280067283431455
+  },
+  "args": {
+    "features": "/data/ldy/ek55_assets/ek55_verb_full_text.npz",
+    "layers": 2,
+    "d_model": 256,
+    "heads": 4,
+    "dropout": 0.1,
+    "last_k": 5,
+    "epochs": 40,
+    "batch_size": 64,
+    "lr": 0.0003,
+    "weight_decay": 0.01,
+    "loss": "ce_evi",
+    "lambda_conc": 0.1,
+    "seed": 0,
+    "export_alpha": "/data/ldy/ek55_assets/alpha_verb_enc_s0.npz",
+    "export_alpha_val": "/data/ldy/ek55_assets/alpha_verb_enc_val_s0.npz",
+    "out": "results/exp8_enc2l.json"
+  },
+  "best_epoch": 11,
+  "parameters": 1379691
+}

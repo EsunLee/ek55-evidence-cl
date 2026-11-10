@@ -159,12 +159,14 @@ def collect_llm_supports(args, mask, n_classes, probs=None, split="test"):
             local = np.argsort(-probs[index])[:top_k]
             local_names = [candidate_names[int(c)] for c in local]
             prompt = build_prompt(past_verb[index], past_noun[index], local_names,
-                                  verb_names, noun_names)
+                                  verb_names, noun_names,
+                                   include_noun=(args.history_format == "verb+noun"))
         else:
             local = np.arange(n_classes)
             local_names = candidate_names
             prompt = build_prompt(past_verb[index], past_noun[index], candidate_names,
-                                  verb_names, noun_names)
+                                  verb_names, noun_names,
+                                   include_noun=(args.history_format == "verb+noun"))
         call_started = _time.time()
         text = llm_ask(prompt, cache_dir=args.llm_cache)
         elapsed = _time.time() - call_started
@@ -369,6 +371,9 @@ def main():
                         help="注入后做交叉拟合的温度缩放，报告缩放后的 ECE")
     parser.add_argument("--predicted-history", default=None,
                         help="用 exp10 产出的 npz 里的预测历史动作名替代标注真值（检验信息泄漏）")
+    parser.add_argument("--history-format", default="verb+noun",
+                        choices=["verb+noun", "verb"],
+                        help="prompt 里的历史动作格式（verb 为消融：只给动词序列）")
     parser.add_argument("--candidate-space", default="verb", choices=["verb", "noun"],
                         help="候选表用动词名还是名词名（跨 noun 轴复现时需要 noun）")
     parser.add_argument("--llm-mode", default="stub", choices=["stub", "real"],
