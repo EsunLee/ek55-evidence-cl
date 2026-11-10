@@ -1,0 +1,46 @@
+{
+  "rows": [
+    [
+      0.4,
+      1486,
+      0.03364737550471064,
+      0.31090174966352624
+    ],
+    [
+      0.5,
+      1478,
+      0.03230148048452225,
+      0.30955585464333785
+    ],
+    [
+      0.6,
+      1176,
+      0.034320323014804865,
+      0.31157469717362046
+    ],
+    [
+      0.7,
+      1073,
+      0.03633916554508748,
+      0.3135935397039031
+    ],
+    [
+      0.8,
+      791,
+      0.03297442799461642,
+      0.310228802153432
+    ]
+  ],
+  "baseline": 0.2772543741588156,
+  "args": {
+    "alpha": "/data/ldy/ek55_assets/alpha_verb_s0.npz",
+    "features": "/data/ldy/ek55_assets/ek55_verb_full_text.npz",
+    "candidate_space": "verb",
+    "llm_rerank_topk": 3,
+    "llm_cache": "/data/ldy/ek55_assets/llm_cache",
+    "llm_limit": 0,
+    "strength": 1.0,
+    "thresholds": "0.4,0.5,0.6,0.7,0.8",
+    "out": "results/exp9_mirror_weak.json"
+  }
+}

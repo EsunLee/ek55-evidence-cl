@@ -1,0 +1,124 @@
+{
+  "args": {
+    "preset": null,
+    "alpha": "/data/ldy/ek55_assets/alpha_noun_s0.npz",
+    "trigger": "vacuity",
+    "budget": 0.5,
+    "stub_accuracy": 0.7,
+    "stub_temperature": 3.0,
+    "feature_readout": "pooled",
+    "features": "/data/ldy/ek55_assets/ek55_noun_full_text.npz",
+    "stub_mode": "uniform",
+    "skill_rare": 0.9,
+    "skill_common": 0.3,
+    "rare_frac": 0.3,
+    "save_probs": "/data/ldy/ek55_assets/probs_noun_b0.5.npz",
+    "risk_coverage": true,
+    "post_hoc_temp": true,
+    "candidate_space": "noun",
+    "llm_mode": "real",
+    "verb_names": "/data/datasets/EPIC-KITCHENS/annotations/EPIC_verb_classes.csv",
+    "noun_names": "/data/datasets/EPIC-KITCHENS/annotations/EPIC_noun_classes.csv",
+    "llm_cache": "/data/ldy/ek55_assets/llm_cache",
+    "llm_ask_mode": "rerank",
+    "llm_rerank_topk": 3,
+    "llm_limit": 0,
+    "llm_confidence_weight": false,
+    "prior_mode": "additive",
+    "strength": 0.2,
+    "strength_mode": "fixed",
+    "seed": 0,
+    "out": "results/exp7_noun_b0.5.json"
+  },
+  "before": {
+    "accuracy": 0.1594885598923284,
+    "ece": 0.03737822222846715,
+    "ece_adaptive": 0.04872250162850565,
+    "nll": 4.263660193044779,
+    "brier": 0.9404549660990378,
+    "vacuity_mean": 0.8776875946395073,
+    "conflict_mean": 0.9286352601581952
+  },
+  "after": {
+    "accuracy": 0.16890982503364738,
+    "ece": 0.05994118523348583,
+    "ece_adaptive": 0.07874741322094814,
+    "nll": 4.289202493838751,
+    "brier": 0.9494298987130879,
+    "vacuity_mean": 0.5199556151812423,
+    "conflict_mean": 0.9068090070803525
+  },
+  "delta": {
+    "accuracy": 0.009421265141318969,
+    "ece": 0.02256296300501868,
+    "vacuity_mean": -0.35773197945826496,
+    "conflict_mean": -0.021826253077842694
+  },
+  "post_hoc_temperature": {
+    "after_temperature": {
+      "ece_equal_width": 0.05994118523348583,
+      "ece_adaptive": 0.07874741322094814,
+      "nll": 4.289202493838751,
+      "brier": 0.9494298987130879
+    },
+    "temperatures": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "ece_delta_vs_before": 0.02256296300501868
+  },
+  "risk_coverage": {
+    "before": {
+      "aurc": 0.7093856320565917,
+      "acc@50": 0.2395693135935397,
+      "acc@80": 0.18166526492851134,
+      "acc@90": 0.1712789827973074
+    },
+    "after": {
+      "aurc": 0.6975985728517646,
+      "acc@50": 0.2503364737550471,
+      "acc@80": 0.1934398654331371,
+      "acc@90": 0.18025430067314885
+    }
+  },
+  "called": 743,
+  "injected_evidence": 0.11199052986520962,
+  "quartiles": [
+    {
+      "quartile": 1,
+      "n": 372,
+      "before": 0.12365591397849462,
+      "after": 0.12365591397849462,
+      "delta": 0.0,
+      "call_rate": 0.0
+    },
+    {
+      "quartile": 2,
+      "n": 371,
+      "before": 0.14285714285714285,
+      "after": 0.14285714285714285,
+      "delta": 0.0,
+      "call_rate": 0.0
+    },
+    {
+      "quartile": 3,
+      "n": 371,
+      "before": 0.11590296495956873,
+      "after": 0.11590296495956873,
+      "delta": 0.0,
+      "call_rate": 1.0
+    },
+    {
+      "quartile": 4,
+      "n": 372,
+      "before": 0.2553763440860215,
+      "after": 0.29301075268817206,
+      "delta": 0.03763440860215056,
+      "call_rate": 1.0
+    }
+  ],
+  "note": "stub 用真实标签构造 LLM 输出，仅为模拟器；换真 LLM 时改 simulate_llm"
+}

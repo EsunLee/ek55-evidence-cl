@@ -1,0 +1,37 @@
+{
+  "rows": [
+    [
+      1.0,
+      0.018610421836228297
+    ],
+    [
+      1.5,
+      0.018610421836228297
+    ],
+    [
+      2.0,
+      0.018610421836228297
+    ],
+    [
+      3.0,
+      0.018610421836228297
+    ]
+  ],
+  "best": {
+    "strength": 1.0,
+    "delta": 0.018610421836228297
+  },
+  "args": {
+    "alpha_val": "/data/ldy/ek55_assets/alpha_gap_val_s0.npz",
+    "features": "/data/ldy/ek55_assets/ek55_verb_gap1s_predhist.npz",
+    "candidate_space": "verb",
+    "trigger": "vacuity",
+    "budget": 0.2,
+    "grid": "1.0,1.5,2.0,3.0",
+    "prior_mode": "additive",
+    "llm_rerank_topk": 3,
+    "llm_cache": "/data/ldy/ek55_assets/llm_cache",
+    "seed": 0,
+    "out": "results/gap_val_select2.json"
+  }
+}

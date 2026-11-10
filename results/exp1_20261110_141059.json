@@ -1,0 +1,153 @@
+{
+  "script": "exp1.py",
+  "timestamp": "20261110_141059",
+  "seed": 0,
+  "readout": "lastk",
+  "evidence_param": "mean",
+  "lambda_conc": 0.1,
+  "args": {
+    "features": "/data/ldy/ek55_assets/ek55_verb_gap1s.npz",
+    "synthetic": false,
+    "n_classes": 97,
+    "dim": 1024,
+    "n_train": 8000,
+    "n_val": 2000,
+    "n_test": 2000,
+    "epochs": 30,
+    "batch_size": 128,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "head": "linear",
+    "hidden": 512,
+    "dropout": 0.3,
+    "lambda_inf": 0.0,
+    "lambda_fit": 0.1,
+    "lambda_var": 0.0,
+    "lambda_conc": 0.1,
+    "var_topk": 0,
+    "soft_label_beta": 1.0,
+    "evidence_param": "mean",
+    "loss": "ce_evi",
+    "label_smoothing": 0.01,
+    "select_by": "nll",
+    "ce_weight": 0.0,
+    "sigma": 1.0,
+    "lambda_dist": 0.0,
+    "n_bins": 15,
+    "readout": "lastk",
+    "last_k": 5,
+    "past_window": 0,
+    "seed": 0,
+    "export_alpha": "/data/ldy/ek55_assets/alpha_gap_s0.npz",
+    "export_alpha_val": "/data/ldy/ek55_assets/alpha_gap_val_s0.npz",
+    "out_dir": null
+  },
+  "env": {
+    "timestamp": "2026-11-10 14:10:59",
+    "hostname": "amax",
+    "platform": "Linux-5.4.0-152-generic-x86_64-with-glibc2.28",
+    "python": "3.10.20",
+    "executable": "/data/conda_envs/insight_env/bin/python",
+    "code": {
+      "repo_root": "/data/ldy/ek55-evidence-cl",
+      "is_git_repo": true,
+      "commit": "304e391",
+      "branch": "main",
+      "dirty": true
+    },
+    "torch": "2.5.1+cu118",
+    "cuda_available": true,
+    "cuda_version": "11.8",
+    "gpu_count": 1,
+    "gpu_names": [
+      "NVIDIA GeForce RTX 3090"
+    ],
+    "gpu_memory_gb": [
+      23.7
+    ],
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "sklearn": "1.7.0"
+  },
+  "data": {
+    "source": "/data/ldy/ek55_assets/ek55_verb_gap1s.npz",
+    "sha1": "5a9a35b19573",
+    "n_train": 5801,
+    "n_test": 606,
+    "dim": 1024,
+    "n_classes": 97
+  },
+  "baseline": {
+    "accuracy": 0.20297029702970298,
+    "ece_equal_width": 0.04548489396250953,
+    "ece_adaptive": 0.059575501344431195,
+    "brier": 0.8821474214807313,
+    "nll": 2.865740804992558,
+    "auroc_confidence": 0.5768822905620361,
+    "auprc_confidence": 0.2554719487572515,
+    "aurc": 0.7556291365846675,
+    "accuracy_at_80pct_coverage": 0.21443298969072164,
+    "temperature": 1.1,
+    "ece_after_vector_scaling": 0.026258338309925126,
+    "ece_after_temperature": 0.02122278585784741
+  },
+  "evidence": {
+    "accuracy": 0.21947194719471946,
+    "ece_equal_width": 0.050670676233579987,
+    "ece_adaptive": 0.06651268716920195,
+    "brier": 0.8798610561102452,
+    "nll": 2.804820147771862,
+    "auroc_confidence": 0.5719690346373333,
+    "auprc_confidence": 0.25536417096236674,
+    "aurc": 0.7511016249384568,
+    "accuracy_at_80pct_coverage": 0.23917525773195877,
+    "auroc_vacuity": 0.5064299225865934,
+    "auroc_conflict": 0.5492536838926068,
+    "mean_vacuity": 0.8345038494642512,
+    "mean_conflict": 0.8900669448796503,
+    "temperature": 1.1,
+    "ece_after_vector_scaling": 0.02943035896329986,
+    "ece_after_temperature": 0.018742550824812625
+  },
+  "matched_comparison": {
+    "target_accuracy": 0.20297029702970298,
+    "baseline_coverage": 0.04950495049504951,
+    "evidence_coverage": 0.04950495049504951,
+    "baseline_selective_ece": 0.04736232398421047,
+    "evidence_selective_ece": 0.29652707649799015
+  },
+  "low_evidence_bucket": {
+    "baseline": {
+      "bucket": 9,
+      "score_range": [
+        0.8051104261158655,
+        0.8428993945545988
+      ],
+      "count": 61,
+      "accuracy": 0.14754098360655737,
+      "ece": 0.031028332020403032,
+      "mean_confidence": 0.1785693156269604
+    },
+    "evidence": {
+      "bucket": 9,
+      "score_range": [
+        0.8531928132876423,
+        0.8781262893891707
+      ],
+      "count": 61,
+      "accuracy": 0.29508196721311475,
+      "ece": 0.1362566265274543,
+      "mean_confidence": 0.3514403594477043
+    }
+  },
+  "decomposition": {},
+  "val_nll": {
+    "baseline": 2.7409083206199902,
+    "evidence": 2.7302361265753667
+  },
+  "seconds": {
+    "baseline": 8.053935527801514,
+    "evidence": 8.654706716537476
+  },
+  "conclusion": "证据头未显示实质可信度改善：需要检查损失（如 L_inf 形式）或特征质量"
+}
