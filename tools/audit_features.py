@@ -55,15 +55,14 @@ def main():
         tensor = torch.load(path, map_location="cpu", weights_only=False)
         x = tensor.float().numpy() if hasattr(tensor, "float") else np.asarray(tensor)
         shapes.append(x.shape)
-        if x.ndim != 3:
-            continue
-        frames, tokens, dim = x.shape
-        finite_ratio = float(np.isfinite(x).mean())
+        finite_ratio = float(np.isfinite(x).mean()) if x.size else 0.0
         finite.append(finite_ratio)
         if finite_ratio < 1.0:
-            # 不做静默清洗：记录文件，并从后续统计中剔除
-            bad_files.append((f"{row['video_id']}_{row['uid']}.pt", finite_ratio))
+            bad_files.append((os.path.basename(path), finite_ratio))
             continue
+        if x.ndim != 3 or x.shape[1] <= 16:
+            continue
+        frames, tokens, dim = x.shape
         norms.append(np.linalg.norm(x, axis=2).mean())
         per_pos_norm.append(np.linalg.norm(x, axis=2).mean(axis=1))
         frame = x[0]
@@ -83,12 +82,10 @@ def main():
                 randoms.append(cos(frame[i], frame[j]))
         dist_sim["random"].append(np.mean(randoms))
 
-    shapes = np.array(shapes)
     print("=" * 60)
     print("【实测事实】")
-    print(f"  抽样文件 {len(shapes)}｜frames {sorted({int(s[0]) for s in shapes})}"
-          f"｜tokens {sorted({int(s[1]) for s in shapes})}"
-          f"｜dim {sorted({int(s[2]) for s in shapes})}")
+    print(f"  抽样行 {len(sample)}｜已读取文件 {len(shapes)}｜缺文件 {len(sample) - len(shapes)}")
+    print(f"  实测形状 {sorted(set(shapes))}｜有效三维文件 {len(norms)}")
     if bad_files:
         print(f"  ⚠️ 含非有限值的文件 {len(bad_files)}/{len(shapes)}"
               f"（比例 {len(bad_files)/len(shapes):.1%}），已从统计中剔除、未做清洗：")
@@ -96,6 +93,8 @@ def main():
             print(f"      {name}  有限值 {ratio:.4f}")
     else:
         print("  非有限值：未发现（全部文件 finite=1.0）")
+    if not norms:
+        raise SystemExit("[中止] 没有可用于相似度统计的有限三维张量")
     print(f"  有限值比例 {np.mean(finite):.4f}｜向量 L2 范数 {np.mean(norms):.3f}"
           f"（范围 {np.min(norms):.3f}–{np.max(norms):.3f}）")
     print(f"  单帧内去重切片比例 {np.mean(uniq):.3f}（1.0=无重复 token）")
@@ -108,17 +107,18 @@ def main():
     for row in rows:
         by_video[row["video_id"]].append(row)
     pairs = []
-    for video, segs in by_video.items():
+    for segs in by_video.values():
         segs.sort(key=lambda r: int(r["start_frame"]))
         for a, b in zip(segs, segs[1:]):
             if int(a["stop_frame"]) < int(b["start_frame"]) and \
                int(b["start_frame"]) - int(a["stop_frame"]) <= 30:
                 pairs.append((a, b))
-        if len(pairs) >= args.n_pairs:
-            break
-    pairs = pairs[: args.n_pairs]
+    random.shuffle(pairs)
 
-    matrix = np.zeros((4, 4)); used = 0
+    matrix = np.zeros((4, 4))
+    used = 0
+    pair_videos = set()
+    pair_bad_files = set()
     for a, b in pairs:
         pa = os.path.join(args.features, f"{a['video_id']}_{a['uid']}.pt")
         pb = os.path.join(args.features, f"{b['video_id']}_{b['uid']}.pt")
@@ -126,12 +126,19 @@ def main():
             continue
         xa = torch.load(pa, map_location="cpu", weights_only=False).float().numpy()
         xb = torch.load(pb, map_location="cpu", weights_only=False).float().numpy()
-        if xa.ndim != 3 or xb.ndim != 3:
+        nonfinite = [path for path, x in ((pa, xa), (pb, xb)) if not np.isfinite(x).all()]
+        if nonfinite:
+            pair_bad_files.update(nonfinite)
             continue
-        for i in range(min(4, xa.shape[0])):
-            for j in range(min(4, xb.shape[0])):
+        if xa.ndim != 3 or xa.shape != xb.shape or xa.shape[0] != 4 or not xa.size:
+            continue
+        for i in range(4):
+            for j in range(4):
                 matrix[i, j] += cos(xa[i], xb[j])
         used += 1
+        pair_videos.add(a["video_id"])
+        if used >= args.n_pairs:
+            break
 
     print("\n【结构假设】（只能说与…相容，不能确认为结论）")
     d1, dr = np.mean(dist_sim[1]), np.mean(dist_sim["random"])
@@ -145,9 +152,13 @@ def main():
     if d16 - dr > 0.05:
         print(f"  列方向：距离 16 比随机高 {d16 - dr:+.3f}，与按行优先排列的网格相容")
 
+    if pair_bad_files:
+        print(f"  跨段配对中含非有限值的文件 {len(pair_bad_files)} 个：")
+        for path in sorted(pair_bad_files):
+            print(f"    {path}")
     if used:
         matrix /= used
-        print(f"\n  时间顺序：{used} 对相邻段（无重叠、间隔 ≤30 帧）的 4×4 跨段相似度")
+        print(f"\n  时间顺序：{used} 对相邻段，{len(pair_videos)} 个视频（无重叠、间隔 ≤30 帧）的 4×4 跨段相似度")
         for i in range(4):
             print("    " + "  ".join(f"{matrix[i, j]:.3f}" for j in range(4)))
         last_first = matrix[3, 0]
@@ -164,7 +175,7 @@ def main():
     print("  · 四帧的采样时刻（是否均匀、是否含段末帧）")
     print("  · 是否保留位置编码")
     print("  · 是否已做时空融合（若已融合，打乱 token 顺序不等价于消除时序）")
-    return 0
+    return 2 if bad_files or pair_bad_files else 0
 
 
 if __name__ == "__main__":

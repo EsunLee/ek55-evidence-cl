@@ -17,6 +17,8 @@ import argparse
 import csv
 import os
 import random
+import sys
+from pathlib import Path
 from collections import defaultdict
 
 
@@ -44,9 +46,14 @@ def mode_sample(args):
     random.seed(args.seed)
     rows = list(csv.DictReader(open(args.labels)))
     by_video = defaultdict(list)
+    missing = 0
     for row in rows:
         span = int(row["stop_frame"]) - int(row["start_frame"]) + 1
         if args.min_frames <= span <= args.max_frames:
+            path = Path(args.features) / f"{row['video_id']}_{row['uid']}.pt"
+            if not path.is_file():
+                missing += 1
+                continue
             by_video[row["video_id"]].append(row)
 
     chosen, videos = [], sorted(by_video)
@@ -59,6 +66,9 @@ def mode_sample(args):
             break
     chosen = chosen[: args.n]
 
+    if not chosen:
+        raise SystemExit("[中止] 没有同时满足段长限制和特征存在条件的片段")
+    print(f"[采样] 段长合格但缺少特征 {missing} 条")
     fields = ["uid", "video_id", "start_timestamp", "stop_timestamp", "narration",
               "state_holding", "state_tilt", "near_object", "judgeable", "note"]
     with open(args.out, "w", newline="", encoding="utf-8") as handle:
@@ -82,22 +92,36 @@ def mode_train(args):
     import numpy as np
     import torch
 
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "code"))
+    from metrics import auroc
+
+    state_col = {"holding": "state_holding", "tilt": "state_tilt"}.get(args.state, args.state)
+    reader = csv.DictReader(open(args.labels, encoding="utf-8-sig", newline=""))
+    required = {"uid", "video_id", "judgeable", state_col}
+    missing = required - set(reader.fieldnames or [])
+    if missing:
+        raise SystemExit(f"[中止] 标注表缺少列：{', '.join(sorted(missing))}")
+
     rows, labels, groups, usable = [], [], [], 0
-    for row in csv.DictReader(open(args.labels)):
+    for row in reader:
         if row.get("judgeable", "").strip() != "1":
             continue
-        value = row.get(args.state, "").strip()
+        value = row.get(state_col, "").strip()
         if value not in ("0", "1"):
             continue
         path = os.path.join(args.features, f"{row['video_id']}_{row['uid']}.pt")
         if not os.path.isfile(path):
-            continue
+            raise SystemExit(f"[中止] 已标注片段缺少特征：{path}")
         tensor = torch.load(path, map_location="cpu", weights_only=False)
         array = tensor.float().numpy() if hasattr(tensor, "float") else np.asarray(tensor)
         if array.ndim == 3:                 # [frames, tokens, dim] → 池化
             vector = array.mean(axis=(0, 1))
+        elif array.ndim == 2:
+            vector = array.mean(axis=0)
         else:
-            vector = array.reshape(-1)
+            raise SystemExit(f"[中止] 特征形状不支持：{path} {array.shape}")
+        if not np.isfinite(array).all() or not np.isfinite(vector).all():
+            raise SystemExit(f"[中止] 特征包含非有限值：{path}")
         rows.append(vector); labels.append(int(value)); groups.append(row["video_id"])
         usable += 1
 
@@ -121,6 +145,13 @@ def mode_train(args):
     if test_mask.sum() < 5:
         raise SystemExit("[中止] 测试集样本过少")
 
+    for split, mask in (("train", train_mask), ("held-out", test_mask)):
+        pos = int(y[mask].sum())
+        neg = int(mask.sum() - pos)
+        print(f"[划分] {split}｜视频 {len(set(g[mask]))}｜正例 {pos} / 负例 {neg}")
+        if not pos or not neg:
+            raise SystemExit(f"[中止] {split} 缺少一个类别，补充跨视频标注后再运行")
+
     mean, std = X[train_mask].mean(0), X[train_mask].std(0) + 1e-8
     Xn = (X - mean) / std
 
@@ -141,18 +172,13 @@ def mode_train(args):
     acc = float((pred == yt).mean())
     majority = float(max(yt.mean(), 1 - yt.mean()))
 
-    # AUC（不依赖 sklearn）
-    order = np.argsort(score)
-    ranks = np.empty(len(score)); ranks[order] = np.arange(1, len(score) + 1)
-    pos, neg = yt.sum(), len(yt) - yt.sum()
-    auc = float((ranks[yt == 1].sum() - pos * (pos + 1) / 2) / (pos * neg)) if pos and neg else float("nan")
+    auc = auroc(score, yt == 1)
 
-    print(f"\n[结果] state = {args.state}")
+    print(f"\n[结果] state = {state_col}")
     print(f"  测试样本 {int(test_mask.sum())}（{len(set(g[test_mask]))} 个视频）")
     print(f"  探针准确率 {acc:.4f}｜多数类基线 {majority:.4f}｜提升 {acc - majority:+.4f}")
-    print(f"  AUC {auc:.4f}（0.5 = 与随机无异）")
-    print("\n[判读] AUC 显著 > 0.5 且优于多数类 ⇒ 状态与当前特征相容、可读出；")
-    print("       AUC ≈ 0.5 ⇒ 可能是信息不足，也可能是标注/样本量问题，不能直接判定信息不存在。")
+    print(f"  AUC {auc:.4f}（恒定分数基线 0.5）")
+    print("  单次视频级划分的探索性点估计。")
     return 0
 
 
